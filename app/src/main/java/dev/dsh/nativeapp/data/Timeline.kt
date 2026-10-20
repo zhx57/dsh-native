@@ -43,6 +43,15 @@ sealed interface TimelineItem {
          * ordinal is what keeps their identities distinct.
          */
         val part: Int = 0,
+        /**
+         * True for a row the live stream invented.
+         *
+         * The stream numbers a provisional row with the client's local counter, which
+         * can coincide with the `seq` of the message that eventually commits the same
+         * step. Without this flag the preview and the committed row would share an
+         * identity, and the committed row would be rejected as a duplicate.
+         */
+        val live: Boolean = false,
     ) : TimelineItem
 
     data class ToolCallItem(
@@ -128,7 +137,9 @@ sealed interface TimelineItem {
  */
 fun TimelineItem.keyOf(): String = when (this) {
     is TimelineItem.UserMessage -> "user:$seq"
-    is TimelineItem.AssistantMessage -> "assistant:$seq:$part"
+    // A live preview carries a client counter, not a host seq, so it stays distinct
+    // from the committed row that will replace it.
+    is TimelineItem.AssistantMessage -> if (live) "assistant:live:$seq:$part" else "assistant:$seq:$part"
     is TimelineItem.ToolCallItem -> "tool:$callId"
     is TimelineItem.PendingQuestionItem -> "question:$callId"
     is TimelineItem.TurnDivider -> "divider:$turn"

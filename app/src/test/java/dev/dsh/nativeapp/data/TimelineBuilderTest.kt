@@ -63,6 +63,48 @@ class TimelineBuilderTest {
     }
 
     @Test
+    fun `a split run is not printed twice once the message commits`() {
+        val builder = TimelineBuilder()
+        builder.applyStreamFrame(
+            Json.parseToJsonElement("""{"type":"start","attemptId":"a1","turn":1,"step":1}""") as JsonObject,
+        )
+        builder.applyStreamFrame(
+            Json.parseToJsonElement(
+                """{"type":"chunk","attemptId":"a1","turn":1,"step":1,"chunk":{"type":"text-delta","text":"before"}}""",
+            ) as JsonObject,
+        )
+        builder.applyStreamFrame(
+            Json.parseToJsonElement(
+                """{"type":"chunk","attemptId":"a1","turn":1,"step":1,"chunk":{"type":"tool-call-delta","id":"c1","name":"read"}}""",
+            ) as JsonObject,
+        )
+        builder.applyStreamFrame(
+            Json.parseToJsonElement(
+                """{"type":"chunk","attemptId":"a1","turn":1,"step":1,"chunk":{"type":"text-delta","text":"after"}}""",
+            ) as JsonObject,
+        )
+        // The commit reprints the whole step, so neither live run may survive it.
+        builder.applyRecord(
+            event(
+                8,
+                "assistant/message",
+                """{"turn":1,"step":1,"message":{"role":"assistant","content":[
+                    {"type":"text","text":"before"},
+                    {"type":"tool-call","id":"c1","name":"read","arguments":"{}"},
+                    {"type":"text","text":"after"}
+                ]}}""",
+            ),
+        )
+
+        val prose = builder.snapshot()
+            .filterIsInstance<TimelineItem.AssistantMessage>()
+            .joinToString("|") { row ->
+                row.blocks.filterIsInstance<ContentBlock.Text>().joinToString("") { it.text }
+            }
+        assertEquals("before|after", prose)
+    }
+
+    @Test
     fun `text before a tool call stays above it`() {
         val rows = fold(
             event(1, "step/start", """{"turn":1,"step":1}"""),

@@ -54,6 +54,19 @@ class TimelineBuilder {
      */
     private val detachedCalls = HashMap<String, TimelineItem>()
 
+    /**
+     * Rows the current stream froze because a tool call interrupted their prose run.
+     *
+     * They exist so the transcript reads prose → tool → prose while the step is
+     * live. The committed `assistant/message` reprints the same text, so these are
+     * removed when that message lands; keeping both printed every split run twice.
+     *
+     * The set only ever holds rows of the step being streamed, because it is cleared
+     * whenever a new step opens. A row frozen by a step that never committed (the
+     * operator stopped mid-step) therefore stays on screen as the turn's prefix.
+     */
+    private val frozenRows = HashSet<String>()
+
     /** Step being generated, keyed `turn:step`, mirroring the web assistant node. */
     private var streaming: StreamingStep? = null
     private var localSeq = 0L
@@ -137,6 +150,7 @@ class TimelineBuilder {
         commandIndex.clear()
         rowKeys.clear()
         detachedCalls.clear()
+        frozenRows.clear()
         streaming = null
         localSeq = 0L
         lastTime = 0L
@@ -321,6 +335,8 @@ class TimelineBuilder {
         // Detaching and re-emitting in content order fixes that without losing the
         // arguments or result the stream already collected.
         blocks.filterIsInstance<ContentBlock.ToolCall>().forEach { detachCall(it.id) }
+        // Frozen live rows for this step are superseded by the rows emitted below.
+        dropFrozenRows()
 
         var run = mutableListOf<ContentBlock>()
         var part = 0
@@ -341,6 +357,29 @@ class TimelineBuilder {
             }
         }
         flushRun()
+    }
+
+    /**
+     * Drop the rows the live stream froze at tool boundaries.
+     *
+     * Called when a committed `assistant/message` lands, because it reprints that
+     * text in the right order on its own. Any frozen row whose step never committed
+     * (aborted mid-step) is left in place by the caller not reaching here.
+     */
+    private fun dropFrozenRows() {
+        if (frozenRows.isEmpty()) return
+        val keys = frozenRows.toSet()
+        frozenRows.clear()
+        var index = items.size - 1
+        while (index >= 0) {
+            val row = items[index]
+            if (row is TimelineItem.AssistantMessage && row.keyOf() in keys) {
+                items.removeAt(index)
+                rowKeys.remove(row.keyOf())
+                shiftIndicesAfter(index)
+            }
+            index -= 1
+        }
     }
 
     /**
@@ -549,11 +588,15 @@ class TimelineBuilder {
         when (frameType) {
             "start" -> {
                 if (streaming?.partition != partition) finalizeStreaming()
+                val fresh = streaming == null
                 val active = streaming ?: StreamingStep(partition, turn, step).also {
                     it.lastSeq = localSeq
                     it.lastTime = lastTime
                     streaming = it
                 }
+                // A new step owns its own frozen rows; the previous step's were
+                // either superseded by its commit or belong to an aborted prefix.
+                if (fresh) frozenRows.clear()
                 active.attemptIds.add(attemptId)
             }
 
@@ -606,7 +649,7 @@ class TimelineBuilder {
                 val block = chunk["block"] as? JsonObject
                 val id = JsonText.string(block?.get("id"))
                 val name = JsonText.string(block?.get("name"))
-                if (blockType == "tool-call" && id != null && name != null) {
+                if (blockType == "tool-call" && block != null && id != null && name != null) {
                     registerCall(id, name, JsonText.string(block["arguments"]).orEmpty(), step.lastSeq, time)
                 }
             }
@@ -678,10 +721,14 @@ class TimelineBuilder {
                     items.removeAt(index)
                     shiftIndicesAfter(index)
                 } else {
-                    // Freeze in place: the row keeps its position above the call.
-                    val frozen = current.copy(streaming = false)
+                    // Freeze in place: the row keeps its position above the call, and
+                    // stops being "live" so the committed message's own row for this
+                    // run supersedes it instead of printing the same words twice.
+                    val frozen = current.copy(streaming = false, live = false)
                     items[index] = frozen
+                    rowKeys.remove(current.keyOf())
                     rowKeys.add(frozen.keyOf())
+                    frozenRows.add(frozen.keyOf())
                 }
             }
         }
@@ -713,6 +760,7 @@ class TimelineBuilder {
                 blocks = emptyList(),
                 streaming = true,
                 part = step.part,
+                live = true,
             ),
         )
         return step.indexInList
@@ -728,6 +776,7 @@ class TimelineBuilder {
             blocks = step.blocks.toList(),
             streaming = true,
             part = step.part,
+            live = true,
         )
         items[index] = next
         // The preview's identity is stable across deltas, so a recompose reuses the

@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import dev.dsh.nativeapp.data.ChatUiState
 import dev.dsh.nativeapp.data.TimelineItem
 import dev.dsh.nativeapp.data.TurnOutcomeKind
+import dev.dsh.nativeapp.data.keyOf
 import dev.dsh.nativeapp.ui.theme.DshRadius
 import dev.dsh.nativeapp.ui.theme.DshSpacing
 import dev.dsh.nativeapp.ui.theme.LocalDshColors
@@ -204,7 +205,7 @@ fun ChatScreen(
                         isEmpty = state.timeline.isEmpty(),
                     )
                 }
-                items(items = state.timeline, key = { keyOf(it) }) { item ->
+                items(items = state.timeline, key = { it.keyOf() }) { item ->
                     when (item) {
                         is TimelineItem.UserMessage -> UserTurn(item)
                         is TimelineItem.AssistantMessage -> AssistantTurn(item)
@@ -422,7 +423,6 @@ private fun NoSessionState() {
 }
 
 /** Stable identity so streaming updates reuse rows instead of rebuilding them. */
-private fun keyOf(item: TimelineItem): String = item.keyOf()
 
 /**
  * How a turn ended, when it did not simply complete.

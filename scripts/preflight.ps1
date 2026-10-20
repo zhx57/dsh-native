@@ -95,6 +95,41 @@ foreach ($name in $signatures.Keys) {
     }
 }
 
+# 3. A top-level extension declared in `data` is used from another package
+#    without importing it. Kotlin reports only "Unresolved reference", which costs
+#    a full CI round trip to learn.
+$dataRoot = Join-Path $src "dev/dsh/nativeapp/data"
+$extensions = @{}
+if (Test-Path $dataRoot) {
+    foreach ($file in Get-ChildItem $dataRoot -Recurse -Filter *.kt -File) {
+        $text = Get-Content $file.FullName -Raw
+        if ($text -notmatch '(?m)^package\s+dev\.dsh\.nativeapp\.data\b') { continue }
+        # `fun Receiver.name(...)` at column 0 is a top-level extension. The fold's
+        # row identity is the one this rule exists for; adding more is free.
+        foreach ($m in [regex]::Matches($text, '(?m)^fun\s+(\w+(?:\.\w+)*)\.(\w+)\s*\(')) {
+            $extensions[$m.Groups[2].Value] = $m.Groups[1].Value
+        }
+    }
+}
+foreach ($file in $files) {
+    $text = Get-Content $file.FullName -Raw
+    if ($text -match '(?m)^package\s+dev\.dsh\.nativeapp\.data\b') { continue }
+    foreach ($name in $extensions.Keys) {
+        # Usage is `.name(` on a receiver, or a bare `name(receiver)` call.
+        if ($text -notmatch "(?m)(?<!fun\s)\.\s*$name\s*\(" -and
+            $text -notmatch "(?m)^(?!\s*(//|\*|/\*|import )).*?(?<![\w.])$name\s*\(") { continue }
+        if ($text -match [regex]::Escape("import dev.dsh.nativeapp.data.$name")) { continue }
+        $problems += "$($file.Name): uses extension $name without `"import dev.dsh.nativeapp.data.$name`""
+    }
+}
+
+# 4. (not attempted) Nullable-receiver reads such as indexing a local assigned from
+#    `as?` inside a condition that checks other names. This is a real Kotlin error
+#    ("Only safe (?.) or non-null asserted (!!.) calls are allowed"), but deciding it
+#    soundly means tracking scope, and a regex approximation flagged a dozen safe
+#    reads that end in `?: return`. A rule that cries wolf gets ignored, so this one
+#    is left to the compiler.
+
 if ($problems.Count -eq 0) {
     Write-Host "preflight: no known issues"
     exit 0
