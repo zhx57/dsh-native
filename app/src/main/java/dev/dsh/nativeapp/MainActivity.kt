@@ -111,17 +111,27 @@ private fun DshRoot(
         return
     }
 
-    val modelLabel = catalog?.default?.let { ref ->
-        catalog?.groups
-            ?.firstOrNull { it.id == ref.provider }
-            ?.models?.firstOrNull { it.id == ref.model }?.name
-            ?: ref.model
-    }
+    // Prefer the session's own selection; the catalog default only applies before
+    // the first snapshot arrives.
+    val activeProvider = chat.modelProvider ?: catalog?.default?.provider
+    val activeModel = chat.modelName ?: catalog?.default?.model
+    val activeEffort = chat.reasoningEffort ?: catalog?.default?.reasoningEffort
+
+    val modelLabel = catalog?.groups
+        ?.firstOrNull { it.id == activeProvider }
+        ?.models?.firstOrNull { it.id == activeModel }
+        ?.name
+        ?: activeModel
+
+    val effortSuffix = activeEffort
+        ?.takeIf { it.isNotBlank() && it != "off" }
+        ?.let { " · ${dev.dsh.nativeapp.ui.chat.effortLabel(it)}" }
+        .orEmpty()
 
     ChatScaffold(
         state = chat,
         groups = groups,
-        modelLabel = modelLabel,
+        modelLabel = modelLabel?.let { "$it$effortSuffix" },
         onSelectSession = { vm.openSession(it) },
         onNewSession = { vm.newSession() },
         onOpenSettings = { showSettings = true },
@@ -139,8 +149,9 @@ private fun DshRoot(
     if (showModelPicker) {
         dev.dsh.nativeapp.ui.chat.ModelPickerSheet(
             catalog = catalog,
-            currentProvider = catalog?.default?.provider,
-            currentModel = catalog?.default?.model,
+            currentProvider = activeProvider,
+            currentModel = activeModel,
+            currentEffort = activeEffort,
             onDismiss = { showModelPicker = false },
             onSelect = { provider, model, effort ->
                 showModelPicker = false

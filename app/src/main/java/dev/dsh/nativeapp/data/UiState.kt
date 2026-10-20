@@ -18,6 +18,10 @@ data class ChatUiState(
     val permissionPreset: String? = null,
     val commands: List<SlashCommand> = emptyList(),
     val pendingApproval: PendingApproval? = null,
+    /** Effective model for this session, from the `modelSelection` projection. */
+    val modelProvider: String? = null,
+    val modelName: String? = null,
+    val reasoningEffort: String? = null,
 )
 
 /** One todo row from the `todos` projection. */

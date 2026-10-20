@@ -150,6 +150,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                 val usage = detectUsage(value)
                 val projections = detectProjections(value)
                 val approval = detectApproval(value)
+                val selection = detectModelSelection(value)
                 viewModelScope.launch {
                     _chat.value = _chat.value.copy(
                         timeline = activeBuilder.snapshot(),
@@ -160,6 +161,9 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                         todos = projections?.first ?: _chat.value.todos,
                         permissionPreset = projections?.second ?: _chat.value.permissionPreset,
                         pendingApproval = approval ?: _chat.value.pendingApproval,
+                        modelProvider = selection?.first ?: _chat.value.modelProvider,
+                        modelName = selection?.second ?: _chat.value.modelName,
+                        reasoningEffort = selection?.third ?: _chat.value.reasoningEffort,
                     )
                 }
             },
@@ -226,6 +230,24 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         val preset = (values["permissions"] as? JsonObject)
             ?.let { dev.dsh.nativeapp.data.JsonText.string(it["currentValue"]) }
         return todos to preset
+    }
+
+    /**
+     * Read the session's effective model selection.
+     *
+     * `modelSelection.next` is what the next turn will use, which is what the
+     * picker must highlight; `lastUsed` lags behind a switch.
+     */
+    private fun detectModelSelection(value: JsonObject): Triple<String, String, String?>? {
+        if (dev.dsh.nativeapp.data.JsonText.string(value["type"]) != "snapshot") return null
+        val projections = value["projections"] as? JsonObject ?: return null
+        val values = projections["values"] as? JsonObject ?: return null
+        val selection = values["modelSelection"] as? JsonObject ?: return null
+        val chosen = (selection["next"] as? JsonObject) ?: (selection["lastUsed"] as? JsonObject) ?: return null
+        val provider = dev.dsh.nativeapp.data.JsonText.string(chosen["provider"]) ?: return null
+        val model = dev.dsh.nativeapp.data.JsonText.string(chosen["model"]) ?: return null
+        val effort = dev.dsh.nativeapp.data.JsonText.string(chosen["reasoningEffort"])
+        return Triple(provider, model, effort)
     }
 
     private fun TodoItemOf(content: String, status: TodoStatus): TodoItem = TodoItem(content, status)
