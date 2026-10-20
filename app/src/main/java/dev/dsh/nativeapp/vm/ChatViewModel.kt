@@ -9,6 +9,7 @@ import dev.dsh.nativeapp.data.SessionStats
 import dev.dsh.nativeapp.data.DshStream
 import dev.dsh.nativeapp.data.ModelCatalog
 import dev.dsh.nativeapp.data.SessionRow
+import dev.dsh.nativeapp.data.SessionSummary
 import dev.dsh.nativeapp.data.TimelineBuilder
 import dev.dsh.nativeapp.data.WorkspaceGroup
 import kotlinx.coroutines.flow.MutableStateFlow
