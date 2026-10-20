@@ -113,9 +113,11 @@ fun ChatScreen(
     // auto-follow until they ask to return to the tail. Without this, a selection
     // being dragged was still racing the follow effect, which is what pulled the
     // screen down mid-copy.
-    val isDragged by listState.isScrollInProgress.collectAsState(initial = false)
-    LaunchedEffect(isDragged) {
-        if (isDragged) followTail = false
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }
+            .collect { dragging ->
+                if (dragging) followTail = false
+            }
     }
 
     // Land on the tail when the session changes. Overlays are handled separately:
