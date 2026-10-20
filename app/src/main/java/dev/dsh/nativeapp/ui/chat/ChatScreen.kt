@@ -27,7 +27,9 @@ import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,6 +70,7 @@ fun ChatScreen(
     onPermissionClick: () -> Unit,
     onAnswerQuestions: (String, Map<String, List<String>>) -> Unit,
     onAnswerLive: (Map<String, List<String>>) -> Unit,
+    onLoadOlder: () -> Unit,
     onPlusClick: () -> Unit,
     attachmentNames: List<String>,
     onRemoveAttachment: (Int) -> Unit,
@@ -97,11 +100,34 @@ fun ChatScreen(
     // Land on the tail without an animation whenever the session appears, so
     // opening the app or coming back from another screen shows the newest state
     // rather than an offset left over from the previous visit.
-    LaunchedEffect(state.sessionId, itemCount == 0) {
+    // Land on the tail whenever the transcript (re)appears, and again on every
+    // resume. Keying this on `sessionId` alone missed the case that mattered:
+    // returning from an overlay keeps the same session and the same row count, so
+    // the viewport stayed wherever it was and the screen opened mid-turn.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(state.sessionId, itemCount) {
         if (itemCount > 0) {
             followTail = true
             listState.scrollToItem(itemCount - 1)
         }
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                followTail = true
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // Load earlier history when the operator reaches the top. The follow stream only
+    // replays the newest window, so without this the transcript simply ended.
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .collect { first ->
+                if (first <= 1) onLoadOlder()
+            }
     }
 
     // Follow the tail while the operator stays there; a plain scroll keeps the

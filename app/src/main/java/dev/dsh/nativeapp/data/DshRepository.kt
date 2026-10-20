@@ -134,7 +134,12 @@ class DshRepository(private val client: DshClient) {
      * pass the `asOfSeq` reported by `session/list` or [loadTail], which reads
      * the cursor first.
      */
-    suspend fun loadPage(sessionId: String, throughSeq: Long, maxMessages: Int = 60): PageResult =
+    suspend fun loadPage(
+        sessionId: String,
+        throughSeq: Long,
+        maxMessages: Int = 60,
+        beforeSeq: Long? = null,
+    ): PageResult =
         withContext(Dispatchers.IO) {
             val value = client.call(
                 "session/page",
@@ -146,6 +151,8 @@ class DshRepository(private val client: DshClient) {
                         })
                         put("throughSeq", throughSeq)
                         put("maxMessages", maxMessages)
+                        // Backwards pagination: only records older than this seq.
+                        if (beforeSeq != null) put("beforeSeq", beforeSeq)
                     })
                 },
             )

@@ -166,6 +166,52 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
     /** Re-read the index; called when the drawer opens so the list is never stale. */
     fun refreshIndexNow() = refreshIndex()
 
+    // ------------------------------------------------------------ history
+
+    /** Guards against stacking page fetches while one is in flight. */
+    private var loadingHistory = false
+
+    private val _hasMoreHistory = MutableStateFlow(false)
+
+    /** True when the host reported more history above what is loaded. */
+    val hasMoreHistory: StateFlow<Boolean> = _hasMoreHistory.asStateFlow()
+
+    /**
+     * Fetch the previous page of history and prepend it.
+     *
+     * The follow stream only replays the newest window (`maxMessages`), so scrolling
+     * past it showed nothing even though the session continues. `session/page`
+     * accepts `beforeSeq` to walk backwards, and answers `hasMore` for the next step.
+     */
+    fun loadOlderHistory() {
+        val sessionId = _chat.value.sessionId ?: return
+        if (loadingHistory || !_hasMoreHistory.value) return
+        val cursor = activeBuilder.oldestSeq()
+        if (cursor <= 0) {
+            _hasMoreHistory.value = false
+            return
+        }
+        loadingHistory = true
+        viewModelScope.launch {
+            try {
+                val page = repo.loadPage(
+                    sessionId = sessionId,
+                    throughSeq = Long.MAX_VALUE,
+                    maxMessages = 24,
+                    beforeSeq = cursor,
+                )
+                activeBuilder.prependPage(page.records)
+                _hasMoreHistory.value = page.hasMore
+                _chat.value = _chat.value.copy(timeline = activeBuilder.snapshot())
+            } catch (error: Throwable) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                _chat.value = _chat.value.copy(error = describe(error, "加载更早的消息失败"))
+            } finally {
+                loadingHistory = false
+            }
+        }
+    }
+
     // -------------------------------------------------------------- index
 
     fun refreshIndex() {
@@ -271,6 +317,9 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         detach()
 
         activeBuilder = TimelineBuilder()
+        // Any session may have more history than the follow window replays, so
+        // paging starts enabled and switches off once the host says so.
+        _hasMoreHistory.value = true
         _chat.value = ChatUiState(
             sessionId = sessionId,
             connecting = true,

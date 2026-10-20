@@ -183,6 +183,7 @@ private fun DshRoot(
         onPermissionClick = { showPermission = true },
         onAnswerQuestions = { callId, answers -> vm.answerQuestions(callId, answers) },
         onAnswerLive = { answers -> vm.answerLiveQuestion(answers) },
+        onLoadOlder = { vm.loadOlderHistory() },
         onPlusClick = { showPlusMenu = true },
         attachmentNames = attachments.map { it.first },
         onRemoveAttachment = { vm.removeAttachment(it) },

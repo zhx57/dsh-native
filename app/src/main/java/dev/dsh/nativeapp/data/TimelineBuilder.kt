@@ -36,6 +36,31 @@ class TimelineBuilder {
 
     fun snapshot(): List<TimelineItem> = items.toList()
 
+    /**
+     * Fold an older page *in front of* what is already loaded.
+     *
+     * Pagination walks backwards, so a page of history is older than everything in
+     * memory. It is folded into a fresh builder and prepended, which keeps existing
+     * rows (and the viewport anchored on them) intact.
+     */
+    fun prependPage(records: List<JsonObject>) {
+        if (records.isEmpty()) return
+        val older = TimelineBuilder()
+        records.forEach(older::applyRecord)
+        val head = older.snapshot()
+        if (head.isEmpty()) return
+
+        items.addAll(0, head)
+        // Every previously recorded index shifted by the size of the prefix.
+        val shift = head.size
+        toolIndex.replaceAll { _, value -> value + shift }
+        commandIndex.replaceAll { _, value -> value + shift }
+        streaming?.let { it.indexInList += shift }
+    }
+
+    /** Oldest sequence folded so far; 0 when nothing is loaded. */
+    fun oldestSeq(): Long = items.minOfOrNull { it.seq } ?: 0L
+
     fun clear() {
         items.clear()
         toolIndex.clear()
