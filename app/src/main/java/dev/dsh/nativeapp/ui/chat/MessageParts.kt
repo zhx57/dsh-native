@@ -112,6 +112,12 @@ fun ToolCallCard(item: TimelineItem.ToolCallItem) {
     val digest = remember(item.arguments) { digestArguments(item.name, item.arguments) }
     val output = remember(item.result) { classifyToolOutput(item.result) }
     val resultPreview = remember(output) { previewOf(output) }
+    val detail = remember(item.name, item.arguments, item.result, item.isError) {
+        toolDetailOf(item.name, item.arguments, item.result, item.isError)
+    }
+    // Diff counters belong on the collapsed row: an edit is most usefully
+    // summarised as "how much moved", not as the path alone.
+    val counts = remember(detail) { diffCounts(detail) }
 
     // Title preference: the model's own explanation, then the concrete target,
     // then the tool's friendly name. This is what the web transcript shows.
@@ -158,7 +164,10 @@ fun ToolCallCard(item: TimelineItem.ToolCallItem) {
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false),
                     )
-                    if (output is ToolOutput.Diff && (output.added + output.removed) > 0) {
+                    if (counts != null && (counts.first + counts.second) > 0) {
+                        Spacer(Modifier.width(6.dp))
+                        DiffStat(counts.first, counts.second)
+                    } else if (output is ToolOutput.Diff && (output.added + output.removed) > 0) {
                         Spacer(Modifier.width(6.dp))
                         DiffStat(output.added, output.removed)
                     }
@@ -203,22 +212,8 @@ fun ToolCallCard(item: TimelineItem.ToolCallItem) {
                     end = DshSpacing.md.dp,
                     bottom = DshSpacing.md.dp,
                 ),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (item.arguments.isNotBlank()) {
-                    SectionLabel("参数")
-                    Text(
-                        text = item.arguments,
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = colors.labelSecondary,
-                    )
-                }
-                if (!item.result.isNullOrBlank()) {
-                    SectionLabel(if (item.isError) "错误" else "输出")
-                    ToolOutputView(output)
-                }
+                ToolDetailView(detail)
             }
         }
     }

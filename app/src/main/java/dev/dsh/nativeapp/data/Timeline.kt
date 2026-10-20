@@ -75,6 +75,21 @@ sealed interface TimelineItem {
         val callId: String,
         val questions: List<QuestionPrompt>,
     ) : TimelineItem
+
+    /**
+     * A host slash command the operator ran.
+     *
+     * `/compact` and friends never produce a `user/message`; the host logs
+     * `command/run` and `command/done` instead, so without this the command looked
+     * like it had been swallowed.
+     */
+    data class CommandItem(
+        override val seq: Long,
+        override val time: Long,
+        val line: String,
+        val result: String? = null,
+        val failed: Boolean = false,
+    ) : TimelineItem
 }
 
 /** One question inside a pending `ask_user_question` call. */

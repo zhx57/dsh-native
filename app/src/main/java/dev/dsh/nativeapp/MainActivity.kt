@@ -7,6 +7,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -14,6 +17,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.dsh.nativeapp.data.ChatUiState
@@ -130,22 +134,11 @@ private fun DshRoot(
     BackHandler(enabled = showModelPicker) { showModelPicker = false }
     BackHandler(enabled = showPlusMenu) { showPlusMenu = false }
 
-    if (showSettings) {
-        SettingsScreen(
-            host = host,
-            appearance = appearance,
-            onAppearance = onAppearance,
-            onBack = { showSettings = false },
-            onUnpair = {
-                app.unpair()
-                host = null
-                paired = false
-                showSettings = false
-            },
-        )
-        return
-    }
-
+    // Settings is drawn over the transcript rather than replacing it. An early
+    // `return` tore down ChatScreen, which discarded its LazyListState and its
+    // follow-the-tail flag — that is why coming back landed on a stale offset
+    // instead of the newest message.
+    Box(Modifier.fillMaxSize()) {
     // Prefer the session's own selection; the catalog default only applies before
     // the first snapshot arrives.
     val activeProvider = chat.modelProvider ?: catalog?.default?.provider
@@ -233,5 +226,24 @@ private fun DshRoot(
                 vm.selectModel(provider, model, effort)
             },
         )
+    }
+
+        // Settings overlays the transcript so ChatScreen keeps its list state.
+        if (showSettings) {
+            Box(Modifier.fillMaxSize().background(LocalDshColors.current.bgBase)) {
+                SettingsScreen(
+                    host = host,
+                    appearance = appearance,
+                    onAppearance = onAppearance,
+                    onBack = { showSettings = false },
+                    onUnpair = {
+                        app.unpair()
+                        host = null
+                        paired = false
+                        showSettings = false
+                    },
+                )
+            }
+        }
     }
 }

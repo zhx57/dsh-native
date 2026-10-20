@@ -18,6 +18,7 @@ class TimelineBuilder {
 
     private val items = mutableListOf<TimelineItem>()
     private val toolIndex = mutableMapOf<String, Int>()
+    private val commandIndex = mutableMapOf<String, Int>()
     private var localSeq = 0L
     private var lastTime = 0L
 
@@ -38,6 +39,7 @@ class TimelineBuilder {
     fun clear() {
         items.clear()
         toolIndex.clear()
+        commandIndex.clear()
         streaming = null
         localSeq = 0L
         lastTime = 0L
@@ -99,6 +101,31 @@ class TimelineBuilder {
                 val summary = JsonText.string(data["summary"]) ?: return
                 if (summary.isNotBlank()) {
                     items.add(TimelineItem.Notice(seq, time, "上下文已压缩"))
+                }
+            }
+            "command/run" -> {
+                val name = JsonText.string(data["name"]) ?: return
+                val args = JsonText.string(data["args"]).orEmpty()
+                val commandId = JsonText.string(data["commandId"]).orEmpty()
+                commandIndex[commandId] = items.size
+                items.add(
+                    TimelineItem.CommandItem(
+                        seq = seq,
+                        time = time,
+                        line = if (args.isBlank()) "/$name" else "/$name $args",
+                    ),
+                )
+            }
+            "command/done" -> {
+                val commandId = JsonText.string(data["commandId"]).orEmpty()
+                val text = JsonText.string(data["text"]).orEmpty()
+                val kind = JsonText.string(data["kind"]).orEmpty()
+                val index = commandIndex[commandId]
+                val existing = index?.let { items.getOrNull(it) as? TimelineItem.CommandItem }
+                if (existing != null && index != null) {
+                    items[index] = existing.copy(result = text, failed = kind != "success")
+                } else if (text.isNotBlank()) {
+                    items.add(TimelineItem.Notice(seq, time, text))
                 }
             }
             "agent/error", "session/error" -> {

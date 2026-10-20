@@ -17,6 +17,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.dsh.nativeapp.data.ChatUiState
 import dev.dsh.nativeapp.data.TimelineItem
+import dev.dsh.nativeapp.ui.theme.DshRadius
 import dev.dsh.nativeapp.ui.theme.DshSpacing
 import dev.dsh.nativeapp.ui.theme.LocalDshColors
 
@@ -83,11 +86,22 @@ fun ChatScreen(
             }
     }
 
-    // Only follow when the operator has not scrolled away, so watching the tail
-    // never yanks the viewport out from under a text selection.
+    // Land on the tail without an animation whenever the session appears, so
+    // opening the app or coming back from another screen shows the newest state
+    // rather than an offset left over from the previous visit.
+    LaunchedEffect(state.sessionId, itemCount == 0) {
+        if (itemCount > 0) {
+            followTail = true
+            listState.scrollToItem(itemCount - 1)
+        }
+    }
+
+    // Follow the tail while the operator stays there; a plain scroll keeps the
+    // viewport pinned without the drift that animateScrollToItem shows on a long
+    // list, and it never fights a text selection because followTail is false then.
     LaunchedEffect(itemCount) {
         if (itemCount > 0 && followTail) {
-            listState.animateScrollToItem(itemCount - 1)
+            listState.scrollToItem(itemCount - 1)
         }
     }
 
@@ -123,6 +137,7 @@ fun ChatScreen(
                             batch = item,
                             onSubmit = { answers -> onAnswerQuestions(item.callId, answers) },
                         )
+                        is TimelineItem.CommandItem -> CommandRow(item)
                         is TimelineItem.TurnDivider -> TurnDivider(item.turn)
                         is TimelineItem.Notice -> Text(
                             text = item.text,
@@ -313,6 +328,35 @@ private fun keyOf(item: TimelineItem): String = when (item) {
     is TimelineItem.TurnDivider -> "d-${item.turn}"
     is TimelineItem.Notice -> "n-${item.seq}"
     is TimelineItem.PendingQuestionItem -> "q-${item.callId}"
+    is TimelineItem.CommandItem -> "c-${item.seq}"
+}
+
+/** A slash command the operator ran, with its outcome. */
+@Composable
+private fun CommandRow(item: TimelineItem.CommandItem) {
+    val colors = LocalDshColors.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(colors.selector.copy(alpha = 0.5f), RoundedCornerShape(DshRadius.md.dp))
+            .padding(horizontal = DshSpacing.md.dp, vertical = 7.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = item.line,
+            fontSize = 12.5.sp,
+            fontFamily = FontFamily.Monospace,
+            color = colors.labelPrimary,
+        )
+        if (!item.result.isNullOrBlank()) {
+            Text(
+                text = item.result,
+                fontSize = 11.5.sp,
+                lineHeight = 17.sp,
+                color = if (item.failed) colors.stateError else colors.labelTertiary,
+            )
+        }
+    }
 }
 
 /** Index of the message above the current viewport, or -1 at the top. */
