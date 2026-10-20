@@ -121,21 +121,18 @@ private fun DshRoot(
     val activeModel = chat.modelName ?: catalog?.default?.model
     val activeEffort = chat.reasoningEffort ?: catalog?.default?.reasoningEffort
 
-    val modelLabel = catalog?.groups
-        ?.firstOrNull { it.id == activeProvider }
-        ?.models?.firstOrNull { it.id == activeModel }
-        ?.name
-        ?: activeModel
-
-    val effortSuffix = activeEffort
-        ?.takeIf { it.isNotBlank() && it != "off" }
-        ?.let { " · ${dev.dsh.nativeapp.ui.chat.effortLabel(it)}" }
-        .orEmpty()
+    // Watches are ~200dp wide: the chip keeps only the bare model id and the
+    // effort as a short suffix, because "workbuddy/deepseek-v4.1-flash · 高"
+    // alone overflows the composer row.
+    val shortModel = activeModel?.substringAfterLast('/') ?: activeModel
+    val shortEffort = activeEffort?.takeIf { it.isNotBlank() && it != "off" }
+        ?.let { dev.dsh.nativeapp.ui.chat.effortShort(it) }
+    val modelLabel = listOfNotNull(shortModel, shortEffort).joinToString(" ")
 
     ChatScaffold(
         state = chat,
         groups = groups,
-        modelLabel = modelLabel?.let { "$it$effortSuffix" },
+        modelLabel = modelLabel,
         onSelectSession = { vm.openSession(it) },
         onNewSession = { vm.newSession() },
         onOpenSettings = { showSettings = true },
@@ -170,7 +167,7 @@ private fun DshRoot(
     if (showInfo) {
         dev.dsh.nativeapp.ui.chat.SessionInfoSheet(
             state = chat,
-            modelLabel = modelLabel?.let { "$it$effortSuffix" },
+            modelLabel = modelLabel,
             onDismiss = { showInfo = false },
         )
     }

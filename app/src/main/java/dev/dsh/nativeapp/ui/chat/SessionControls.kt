@@ -70,23 +70,33 @@ fun PermissionChip(
         modifier
             .background(colors.selector, RoundedCornerShape(DshRadius.full.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 9.dp, vertical = 5.dp),
+            .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             imageVector = permissionIcon(value),
             contentDescription = null,
             tint = accent,
-            modifier = Modifier.size(12.dp),
+            modifier = Modifier.size(11.dp),
         )
-        Spacer(Modifier.width(4.dp))
+        Spacer(Modifier.width(3.dp))
         Text(
-            text = permissionLabel(value),
-            fontSize = 11.5.sp,
+            text = permissionShortLabel(value),
+            fontSize = 11.sp,
             color = accent,
             fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            softWrap = false,
         )
     }
+}
+
+/** Two-character labels so the chip fits beside the model chip on a watch. */
+fun permissionShortLabel(preset: String): String = when (preset) {
+    "read-only" -> "只读"
+    "workspace-write" -> "写入"
+    "danger-full-access" -> "全权"
+    else -> preset
 }
 
 /**

@@ -129,38 +129,44 @@ fun Composer(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // The model chip takes whatever is left after the fixed-size send
+                // button and truncates, so a long model id can never push the
+                // actions off a narrow screen.
                 if (modelLabel != null) {
                     Row(
                         Modifier
+                            .weight(1f, fill = false)
                             .background(colors.selector, RoundedCornerShape(DshRadius.full.dp))
                             .clickable(onClick = onModelClick)
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             text = modelLabel,
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
                             color = colors.labelSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(4.dp))
                 }
                 PermissionChip(preset = permissionPreset, onClick = onPermissionClick)
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.width(4.dp))
 
                 if (running) {
-                    IconButton(onClick = onStop, modifier = Modifier.size(38.dp)) {
+                    IconButton(onClick = onStop, modifier = Modifier.size(36.dp)) {
                         Icon(
                             imageVector = Icons.Filled.Stop,
                             contentDescription = "停止",
                             tint = colors.labelPrimary,
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(19.dp),
                         )
                     }
                 } else {
                     Box(
                         Modifier
-                            .size(34.dp)
+                            .size(32.dp)
                             .background(
                                 if (canSend) colors.buttonPrimaryFill else colors.bgSkeleton,
                                 RoundedCornerShape(DshRadius.full.dp),
@@ -180,7 +186,7 @@ fun Composer(
                                 }
                             },
                             enabled = canSend,
-                            modifier = Modifier.size(34.dp),
+                            modifier = Modifier.size(32.dp),
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.Send,
