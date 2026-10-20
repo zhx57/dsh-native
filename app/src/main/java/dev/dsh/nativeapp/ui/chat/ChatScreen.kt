@@ -113,7 +113,7 @@ fun ChatScreen(
     // auto-follow until they ask to return to the tail. Without this, a selection
     // being dragged was still racing the follow effect, which is what pulled the
     // screen down mid-copy.
-    val isDragged by listState.isScrollInProgress.collectAsState()
+    val isDragged by listState.isScrollInProgress.collectAsState(initial = false)
     LaunchedEffect(isDragged) {
         if (isDragged) followTail = false
     }
@@ -151,10 +151,12 @@ fun ChatScreen(
     // is the leading indicator row, so the real first message sits at index 1.
     LaunchedEffect(listState, hasMoreHistory) {
         snapshotFlow {
-            val info = listState.layoutInfo
-            info.firstVisibleItemIndex to info.firstVisibleItemScrollOffset
+            // Read from the state object: the offset lives there, not on layoutInfo.
+            listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
         }
-            .collect { (first, offset) ->
+            .collect { pair ->
+                val first = pair.first
+                val offset = pair.second
                 if (first <= 1 && offset < 64) onLoadOlder()
             }
     }
