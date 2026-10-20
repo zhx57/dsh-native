@@ -19,7 +19,13 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -138,6 +144,7 @@ fun ChatScreen(
                             onSubmit = { answers -> onAnswerQuestions(item.callId, answers) },
                         )
                         is TimelineItem.CommandItem -> CommandRow(item)
+                        is TimelineItem.TurnOutcome -> TurnOutcomeRow(item)
                         is TimelineItem.TurnDivider -> TurnDivider(item.turn)
                         is TimelineItem.Notice -> Text(
                             text = item.text,
@@ -329,6 +336,73 @@ private fun keyOf(item: TimelineItem): String = when (item) {
     is TimelineItem.Notice -> "n-${item.seq}"
     is TimelineItem.PendingQuestionItem -> "q-${item.callId}"
     is TimelineItem.CommandItem -> "c-${item.seq}"
+    is TimelineItem.TurnOutcome -> "o-${item.seq}"
+}
+
+/**
+ * How a turn ended, when it did not simply complete.
+ *
+ * A provider failure is the case that matters: the web UI shows a red notice with
+ * the message and machine code, and without it a rejected API call looked like a
+ * silent no-op in the app.
+ */
+@Composable
+private fun TurnOutcomeRow(item: TimelineItem.TurnOutcome) {
+    val colors = LocalDshColors.current
+    val isError = item.kind == TimelineItem.TurnOutcomeKind.Error
+    val tint = if (isError) colors.stateError else colors.labelTertiary
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(tint.copy(alpha = 0.08f), RoundedCornerShape(DshRadius.sm.dp))
+            .padding(horizontal = DshSpacing.md.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = if (isError) Icons.Filled.ErrorOutline else Icons.Filled.Info,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(12.dp),
+            )
+            Spacer(Modifier.width(5.dp))
+            Text(
+                text = when (item.kind) {
+                    TimelineItem.TurnOutcomeKind.Error -> "请求失败"
+                    TimelineItem.TurnOutcomeKind.Aborted -> "已停止"
+                    TimelineItem.TurnOutcomeKind.MaxTokens -> "达到输出上限"
+                    TimelineItem.TurnOutcomeKind.Interrupted -> "上一轮中断"
+                    TimelineItem.TurnOutcomeKind.Blocked -> "被拦截"
+                },
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.Medium,
+                color = tint,
+            )
+        }
+        if (!item.message.isNullOrBlank()) {
+            Text(
+                text = item.message,
+                fontSize = 11.5.sp,
+                lineHeight = 17.sp,
+                color = if (isError) colors.labelSecondary else colors.labelTertiary,
+            )
+        }
+        // Machine code and HTTP status are what make a provider failure diagnosable
+        // (bad key, rate limit, model unavailable), so both are surfaced.
+        val meta = listOfNotNull(
+            item.code?.takeIf { it.isNotBlank() },
+            item.status?.let { "HTTP $it" },
+        ).joinToString(" · ")
+        if (meta.isNotBlank()) {
+            Text(
+                text = meta,
+                fontSize = 10.5.sp,
+                fontFamily = FontFamily.Monospace,
+                color = colors.labelCaption,
+            )
+        }
+    }
 }
 
 /** A slash command the operator ran, with its outcome. */

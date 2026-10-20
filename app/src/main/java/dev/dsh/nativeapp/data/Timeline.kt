@@ -83,6 +83,22 @@ sealed interface TimelineItem {
      * `command/run` and `command/done` instead, so without this the command looked
      * like it had been swallowed.
      */
+    /**
+     * Why a turn stopped.
+     *
+     * `turn/end` carries a merge-extensible reason; `error` carries the provider
+     * failure verbatim (message, machine code, HTTP status). Without this the app
+     * looked identical whether a turn completed or the provider rejected the call.
+     */
+    data class TurnOutcome(
+        override val seq: Long,
+        override val time: Long,
+        val kind: TurnOutcomeKind,
+        val message: String? = null,
+        val code: String? = null,
+        val status: Int? = null,
+    ) : TimelineItem
+
     data class CommandItem(
         override val seq: Long,
         override val time: Long,
@@ -90,6 +106,24 @@ sealed interface TimelineItem {
         val result: String? = null,
         val failed: Boolean = false,
     ) : TimelineItem
+}
+
+/** Normalized `turn/end` reason. */
+enum class TurnOutcomeKind {
+    /** The provider or transport failed; [TurnOutcome.message] explains it. */
+    Error,
+
+    /** The operator cancelled. */
+    Aborted,
+
+    /** Hit the output-token ceiling. */
+    MaxTokens,
+
+    /** The host closed an orphaned turn after a crash. */
+    Interrupted,
+
+    /** A guard rejected the step. */
+    Blocked,
 }
 
 /** One question inside a pending `ask_user_question` call. */

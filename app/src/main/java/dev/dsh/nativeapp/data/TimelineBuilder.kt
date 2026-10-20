@@ -95,7 +95,43 @@ class TimelineBuilder {
                 val turn = JsonText.integer(data["turn"]) ?: 0
                 if (turn > 1) items.add(TimelineItem.TurnDivider(seq, time, turn))
             }
-            "turn/end" -> finalizeStreaming()
+            "turn/end" -> {
+                finalizeStreaming()
+                val reason = data["reason"] as? JsonObject
+                val kind = JsonText.string(reason?.get("kind"))
+                when (kind) {
+                    "error" -> {
+                        val failure = reason["error"] as? JsonObject
+                        items.add(
+                            TimelineItem.TurnOutcome(
+                                seq = seq,
+                                time = time,
+                                kind = TurnOutcomeKind.Error,
+                                message = JsonText.string(failure?.get("message")) ?: "请求失败",
+                                code = JsonText.string(failure?.get("code")),
+                                status = JsonText.integer(failure?.get("status")),
+                            ),
+                        )
+                    }
+                    "aborted" -> items.add(
+                        TimelineItem.TurnOutcome(seq, time, TurnOutcomeKind.Aborted, "已停止"),
+                    )
+                    "max-tokens" -> items.add(
+                        TimelineItem.TurnOutcome(
+                            seq, time, TurnOutcomeKind.MaxTokens, "达到输出长度上限",
+                        ),
+                    )
+                    "interrupted" -> items.add(
+                        TimelineItem.TurnOutcome(
+                            seq, time, TurnOutcomeKind.Interrupted, "上一轮被中断",
+                        ),
+                    )
+                    "blocked" -> items.add(
+                        TimelineItem.TurnOutcome(seq, time, TurnOutcomeKind.Blocked, "被安全策略拦截"),
+                    )
+                    else -> Unit
+                }
+            }
             "step/end" -> finalizeStreaming()
             "compact/summary", "compaction/summary" -> {
                 val summary = JsonText.string(data["summary"]) ?: return
