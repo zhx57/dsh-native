@@ -35,6 +35,14 @@ sealed interface TimelineItem {
         val blocks: List<ContentBlock>,
         val streaming: Boolean = false,
         val error: String? = null,
+        /**
+         * Ordinal of this prose run within its source message.
+         *
+         * One `assistant/message` can emit text, call a tool, then emit more text.
+         * Each run is its own row but every one shares the message's `seq`, so the
+         * ordinal is what keeps their identities distinct.
+         */
+        val part: Int = 0,
     ) : TimelineItem
 
     data class ToolCallItem(
@@ -102,10 +110,31 @@ sealed interface TimelineItem {
     data class CommandItem(
         override val seq: Long,
         override val time: Long,
+        val commandId: String = "",
         val line: String,
         val result: String? = null,
         val failed: Boolean = false,
     ) : TimelineItem
+}
+
+/**
+ * Stable identity of a row.
+ *
+ * Two rows can share an event `seq` — one `assistant/message` yields a prose run
+ * and one row per tool call, all anchored on the same event — so the `seq` alone
+ * cannot key them. This identity is what deduplicates an overlapping history page
+ * and what Compose keys a row by, so a re-fold of the same event updates a row
+ * instead of inserting a duplicate next to it.
+ */
+fun TimelineItem.keyOf(): String = when (this) {
+    is TimelineItem.UserMessage -> "user:$seq"
+    is TimelineItem.AssistantMessage -> "assistant:$seq:$part"
+    is TimelineItem.ToolCallItem -> "tool:$callId"
+    is TimelineItem.PendingQuestionItem -> "question:$callId"
+    is TimelineItem.TurnDivider -> "divider:$turn"
+    is TimelineItem.Notice -> "notice:$seq:$text"
+    is TimelineItem.CommandItem -> "command:${commandId.ifBlank { seq.toString() }}"
+    is TimelineItem.TurnOutcome -> "outcome:$seq:$kind"
 }
 
 /** Normalized `turn/end` reason. */

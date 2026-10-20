@@ -422,15 +422,7 @@ private fun NoSessionState() {
 }
 
 /** Stable identity so streaming updates reuse rows instead of rebuilding them. */
-private fun keyOf(item: TimelineItem): String = when (item) {    is TimelineItem.UserMessage -> "u-${item.seq}"
-    is TimelineItem.AssistantMessage -> "a-${item.seq}"
-    is TimelineItem.ToolCallItem -> "t-${item.callId}"
-    is TimelineItem.TurnDivider -> "d-${item.turn}"
-    is TimelineItem.Notice -> "n-${item.seq}"
-    is TimelineItem.PendingQuestionItem -> "q-${item.callId}"
-    is TimelineItem.CommandItem -> "c-${item.seq}"
-    is TimelineItem.TurnOutcome -> "o-${item.seq}"
-}
+private fun keyOf(item: TimelineItem): String = item.keyOf()
 
 /**
  * How a turn ended, when it did not simply complete.

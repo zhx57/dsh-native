@@ -60,6 +60,9 @@ jobs:
             echo "No signing secret configured; the release APK stays unsigned and the debug APK is published."
           fi
 
+      - name: Unit tests
+        run: gradle :app:testDebugUnitTest --stacktrace --no-daemon
+
       - name: Compile
         run: gradle :app:assembleRelease :app:assembleDebug --stacktrace --no-daemon
 
