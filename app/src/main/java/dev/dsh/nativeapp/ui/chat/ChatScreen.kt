@@ -31,6 +31,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -90,33 +91,53 @@ fun ChatScreen(
     // the operator has scrolled up to select text.
     var followTail by remember { mutableStateOf(true) }
 
+    // "Following" means the newest row is actually rendered in the viewport, not
+    // merely that the index is near the end: a short last row or a tall item can
+    // make `lastVisible >= total - 2` true while the operator has scrolled up.
     LaunchedEffect(listState) {
         snapshotFlow { listState.layoutInfo }
             .collect { info ->
-                val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: return@collect
-                val total = info.totalItemsCount
-                if (total > 0) followTail = lastVisible >= total - 2
+                val visible = info.visibleItemsInfo
+                if (visible.isEmpty() || info.totalItemsCount == 0) return@collect
+                val last = visible.last()
+                val viewportEnd = info.viewportEndOffset - info.afterContentPadding
+                // Following only when the final row's bottom is at or above the fold.
+                followTail = last.index >= info.totalItemsCount - 1 &&
+                    last.offset + last.size <= viewportEnd + 1
             }
     }
 
-    // Land on the tail without an animation whenever the session appears, so
-    // opening the app or coming back from another screen shows the newest state
-    // rather than an offset left over from the previous visit.
-    // Land on the tail whenever the transcript (re)appears, and again on every
-    // resume. Keying this on `sessionId` alone missed the case that mattered:
-    // returning from an overlay keeps the same session and the same row count, so
-    // the viewport stayed wherever it was and the screen opened mid-turn.
-    val lifecycleOwner = LocalLifecycleOwner.current
-    LaunchedEffect(state.sessionId, itemCount) {
-        if (itemCount > 0) {
-            followTail = true
-            listState.scrollToItem(itemCount - 1)
-        }
+    // Any drag by the operator takes ownership of the viewport and suspends
+    // auto-follow until they ask to return to the tail. Without this, a selection
+    // being dragged was still racing the follow effect, which is what pulled the
+    // screen down mid-copy.
+    val isDragged by listState.isScrollInProgress.collectAsState()
+    LaunchedEffect(isDragged) {
+        if (isDragged) followTail = false
     }
+
+    // Land on the tail when the session changes. Overlays are handled separately:
+    // this effect must not be keyed on `itemCount`, because every new message would
+    // then force a jump to the bottom and yank the viewport away from a text
+    // selection the operator is making.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(state.sessionId) {
+        followTail = true
+        if (itemCount > 0) listState.scrollToItem(itemCount - 1)
+    }
+
+    // Returning from an overlay or the background re-pins the tail, matching the
+    // expectation that re-entering shows the newest state. It is deferred so the
+    // scroll runs after layout settles.
     DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                 followTail = true
+                scope.launch {
+                    if (listState.layoutInfo.totalItemsCount > 0) {
+                        listState.scrollToItem(listState.layoutInfo.totalItemsCount - 1)
+                    }
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
