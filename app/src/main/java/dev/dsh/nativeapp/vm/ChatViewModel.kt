@@ -69,7 +69,8 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
             while (true) {
                 kotlinx.coroutines.delay(8_000)
                 if (_chat.value.sessionId == null) continue
-                runCatching { repo.listSessions() }.onSuccess(::applySessions)
+                val summaries = runCatching { repo.listSessions() }.getOrNull() ?: continue
+                applySessions(summaries)
             }
         }
     }
@@ -81,17 +82,16 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
 
     fun refreshIndex() {
         viewModelScope.launch {
-            runCatching { repo.listSessions() }
-                .onSuccess { summaries ->
-                    applySessions(summaries)
-                    openMostRecentIfIdle()
-                }
-                .onFailure { error ->
-                    _chat.value = _chat.value.copy(
-                        connecting = false,
-                        error = describe(error, "无法读取会话列表"),
-                    )
-                }
+            try {
+                applySessions(repo.listSessions())
+                openMostRecentIfIdle()
+            } catch (error: Throwable) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                _chat.value = _chat.value.copy(
+                    connecting = false,
+                    error = describe(error, "无法读取会话列表"),
+                )
+            }
         }
     }
 
