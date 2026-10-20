@@ -22,13 +22,26 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
+
+      - name: Resolve Android SDK
+        run: |
+          # The runner image ships an Android SDK; only add what the build needs.
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$SDK/cmdline-tools" -name sdkmanager -type f 2>/dev/null | head -n1)"
+          fi
+          echo "Platforms present:"; ls "$SDK/platforms" 2>/dev/null || true
+          if [ ! -d "$SDK/platforms/android-35" ] && [ -x "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --install "platforms;android-35" "build-tools;35.0.0" || true
+          fi
+          ls "$SDK/platforms" 2>/dev/null || true
 
       - name: Restore release keystore
         env:
