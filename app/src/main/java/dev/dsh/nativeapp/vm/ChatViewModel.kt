@@ -177,15 +177,23 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
     }
 
     /** Submit answers for the live question and clear the card. */
-    fun answerLiveQuestion(answers: Map<String, List<String>>) {        val live = _chat.value.liveQuestion ?: return
-        val request = PendingRequest.Question(live.eventId, _chat.value.sessionId, live.questions)
-        _chat.value = _chat.value.copy(liveQuestion = null)
+    fun answerLiveQuestion(answers: Map<String, List<String>>) {
+        val live = _chat.value.liveQuestion ?: return
+        val request = PendingRequest.Question(live.eventId, live.agentId, live.questions)
+        // The card stays up until the Host accepts the answer. Optimistically
+        // clearing it made a failed submit look like a silent success: the question
+        // vanished, the turn stayed blocked, and there was no way to retry.
+        _chat.value = _chat.value.copy(sending = true)
         viewModelScope.launch {
-            val ok = app.events().answer(request, app.events().answerValue(answers))
-            if (!ok) {
-                _chat.value = _chat.value.copy(
-                    liveQuestion = live,
-                    error = "提交回答失败：事件通道未就绪",
+            val channel = app.events()
+            val ok = channel.answer(request, channel.answerValue(answers))
+            _chat.value = if (ok) {
+                _chat.value.copy(liveQuestion = null, sending = false)
+            } else {
+                _chat.value.copy(
+                    sending = false,
+                    error = channel.lastError.value
+                        ?: if (channel.clientId.value == null) "连不上主机的事件通道，正在重连" else "提交回答失败",
                 )
             }
         }
@@ -202,16 +210,17 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
             reason = pending.reason,
             detail = pending.detail,
         )
-        _chat.value = _chat.value.copy(pendingApproval = null)
         viewModelScope.launch {
             val value = buildJsonObject {
                 put("outcome", if (allowed) "allowed-once" else "rejected")
             }
-            val ok = app.events().answer(request, value)
-            if (!ok) {
-                _chat.value = _chat.value.copy(
-                    pendingApproval = pending,
-                    error = "提交确认失败：事件通道未就绪",
+            val channel = app.events()
+            val ok = channel.answer(request, value)
+            _chat.value = if (ok) {
+                _chat.value.copy(pendingApproval = null)
+            } else {
+                _chat.value.copy(
+                    error = channel.lastError.value ?: "提交确认失败",
                 )
             }
         }
@@ -287,11 +296,15 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                     maxMessages = 24,
                     beforeSeq = cursor,
                 )
-                if (page.records.isEmpty()) {
-                    _hasMoreHistory.value = false
-                } else {
-                    activeBuilder.prependPage(page.records)
-                    _hasMoreHistory.value = page.hasMore
+                val before = activeBuilder.oldestSeq()
+                activeBuilder.prependPage(page.records)
+                val after = activeBuilder.oldestSeq()
+                // A page that produced no new rows cannot advance the window, so
+                // asking again would loop forever on the same answer. That is the
+                // only case where "no more history" is the honest report.
+                val advanced = after < before && after > 0
+                _hasMoreHistory.value = page.hasMore && advanced
+                if (advanced) {
                     _chat.value = _chat.value.copy(timeline = activeBuilder.snapshot())
                 }
             } catch (error: Throwable) {
@@ -434,6 +447,10 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
             onItem = { value ->
                 activeBuilder.applyFollowValue(value)
                 loadedSessionId = sessionId
+                // Compaction rewrites the model surface without changing what the
+                // follow snapshot reported, so the info sheet only updated after a
+                // manual re-read. Refresh as soon as the host says it compacted.
+                if (isCompactionDone(value)) refreshProjections()
                 val running = detectRunning(value)
                 val usage = detectUsage(value)
                 val projections = detectProjections(value)
@@ -474,6 +491,20 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                 }
             },
         )
+    }
+
+    /**
+     * True for the events a compaction lands.
+     *
+     * `compaction/end` is the marker that means the model surface actually shrank,
+     * which is exactly when `contextPressure` and `contextBreakdown` change without a
+     * new follow snapshot. `command/done` is deliberately NOT used: it carries only a
+     * `commandId`, never the command name, so it cannot identify `/compact`.
+     */
+    private fun isCompactionDone(value: JsonObject): Boolean {
+        if (dev.dsh.nativeapp.data.JsonText.string(value["type"]) != "event") return false
+        val event = value["event"] as? JsonObject ?: return false
+        return dev.dsh.nativeapp.data.JsonText.string(event["type"]) == "compaction/end"
     }
 
     /**
@@ -528,6 +559,46 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         val preset = (values["permissions"] as? JsonObject)
             ?.let { dev.dsh.nativeapp.data.JsonText.string(it["currentValue"]) }
         return todos to preset
+    }
+
+    /**
+     * Re-read the session's live projections.
+     *
+     * The follow stream pushes projections only in its opening snapshot, so anything
+     * that changes afterwards — the context size after `/compact` being the case that
+     * matters — stayed at its attach-time value and the info sheet looked frozen.
+     * `session/projections` is the authoritative read for the same numbers.
+     */
+    fun refreshProjections() {
+        val sessionId = _chat.value.sessionId ?: return
+        viewModelScope.launch {
+            val snapshot = repo.projections(sessionId) ?: return@launch
+            // Build the same envelope `detectExtras` understands so both paths share
+            // one parser instead of two that can drift.
+            val envelope = buildJsonObject {
+                put("type", "snapshot")
+                put(
+                    "projections",
+                    buildJsonObject {
+                        put("asOfSeq", snapshot.asOfSeq)
+                        put("values", snapshot.values)
+                    },
+                )
+            }
+            val extras = detectExtras(envelope) ?: return@launch
+            val usage = detectUsage(envelope)
+            val selection = detectModelSelection(envelope)
+            _chat.value = _chat.value.copy(
+                contextBreakdown = extras.breakdown ?: _chat.value.contextBreakdown,
+                sessionStats = extras.stats ?: _chat.value.sessionStats,
+                contextWindow = extras.window ?: _chat.value.contextWindow,
+                queued = extras.queued,
+                tokenUsage = usage ?: _chat.value.tokenUsage,
+                modelProvider = selection?.first ?: _chat.value.modelProvider,
+                modelName = selection?.second ?: _chat.value.modelName,
+                reasoningEffort = selection?.third ?: _chat.value.reasoningEffort,
+            )
+        }
     }
 
     /**

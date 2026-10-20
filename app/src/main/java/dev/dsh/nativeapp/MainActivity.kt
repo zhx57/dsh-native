@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -225,6 +226,9 @@ private fun DshRoot(
     }
 
     if (showInfo) {
+        // Pull fresh numbers on open: the follow stream only sends projections in
+        // its first snapshot, so after `/compact` the sheet showed the old context.
+        LaunchedEffect(chat.sessionId) { vm.refreshProjections() }
         dev.dsh.nativeapp.ui.chat.SessionInfoSheet(
             state = chat,
             modelLabel = modelLabel,

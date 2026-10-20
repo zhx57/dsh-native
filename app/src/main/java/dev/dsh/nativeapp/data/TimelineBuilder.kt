@@ -127,6 +127,11 @@ class TimelineBuilder {
         if (records.isEmpty()) return
         val older = TimelineBuilder()
         records.forEach(older::applyRecord)
+        // Take the older window's low-water mark even when it yields no new rows.
+        // That is what lets the caller tell "this page was entirely already loaded"
+        // (stop asking) from "this page went further back" (keep going).
+        val olderLow = older.oldestSeq()
+        if (olderLow > 0 && olderLow < oldestEventSeq) oldestEventSeq = olderLow
         val head = older.snapshot()
         if (head.isEmpty()) return
 
@@ -141,8 +146,26 @@ class TimelineBuilder {
         streaming?.let { it.indexInList += shift }
     }
 
-    /** Oldest event sequence folded so far; 0 when nothing is loaded. */
-    fun oldestSeq(): Long = items.minOfOrNull { it.seq } ?: 0L
+    /**
+     * Oldest *event* folded so far; 0 when nothing is loaded.
+     *
+     * This deliberately tracks events rather than rows. A row's `seq` is the anchor
+     * of the event that produced it, and several rows share one anchor; more
+     * importantly a row can be dropped on re-fold (duplicate suppression, a
+     * superseded streaming preview) while its event was still consumed. Paging from
+     * a row would then ask for a window that overlaps what is already loaded, and the
+     * host would answer with the same page again — which looked like "已经是最早的
+     * 消息" the moment the overlap contained nothing new.
+     */
+    fun oldestSeq(): Long = if (oldestEventSeq == Long.MAX_VALUE) 0L else oldestEventSeq
+
+    /** Lowest event seq ever folded into this builder. */
+    private var oldestEventSeq = Long.MAX_VALUE
+
+    /** Fold one raw event, tracking the window's low-water mark. */
+    private fun noteEvent(seq: Long) {
+        if (seq > 0 && seq < oldestEventSeq) oldestEventSeq = seq
+    }
 
     fun clear() {
         items.clear()
@@ -151,6 +174,7 @@ class TimelineBuilder {
         rowKeys.clear()
         detachedCalls.clear()
         frozenRows.clear()
+        oldestEventSeq = Long.MAX_VALUE
         streaming = null
         localSeq = 0L
         lastTime = 0L
@@ -191,6 +215,7 @@ class TimelineBuilder {
         val time = JsonText.long(event["time"]) ?: lastTime
         lastTime = time
         if (seq >= localSeq) localSeq = seq + 1
+        noteEvent(seq)
         val data = event["data"] as? JsonObject ?: JsonObject(emptyMap())
 
         when (type) {

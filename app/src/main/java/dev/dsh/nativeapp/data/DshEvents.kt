@@ -1,10 +1,12 @@
 package dev.dsh.nativeapp.data
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -29,6 +31,11 @@ class DshEvents(private val client: DshClient) {
     /** Host client id from the `ready` frame, required to address a result. */
     private val _clientId = MutableStateFlow<String?>(null)
     val clientId: StateFlow<String?> = _clientId
+
+    private val _lastError = MutableStateFlow<String?>(null)
+
+    /** Why the last answer attempt failed, so the UI can say something真 useful. */
+    val lastError: StateFlow<String?> = _lastError
 
     private val _requests = MutableSharedFlow<PendingRequest>(
         replay = 0,
@@ -102,43 +109,60 @@ class DshEvents(private val client: DshClient) {
      *
      * `outcome.kind = "result"` settles the Host waterfall with a value; omitting
      * the value (or sending `next`) declines it so another answerer can take over.
+     *
+     * This is a `suspend` function on purpose. `client.call` performs a blocking
+     * HTTP request, so calling it from the main thread throws
+     * `NetworkOnMainThreadException`; the previous non-suspend version wrapped that
+     * in `runCatching`, which swallowed it and reported "事件通道未就绪" for what was
+     * really a threading bug. The answer never reached the Host, so the question
+     * stayed open and the card looked broken.
      */
-    fun answer(request: PendingRequest, value: JsonObject): Boolean {
-        val clientId = _clientId.value ?: return false
-        return runCatching {
-            client.call(
-                "\$events/result",
-                buildJsonObject {
-                    put("clientId", clientId)
-                    put("eventId", request.eventId)
-                    put(
-                        "outcome",
-                        buildJsonObject {
-                            put("kind", "result")
-                            put("value", value)
-                        },
-                    )
-                },
-            )
-            true
-        }.getOrDefault(false)
-    }
+    suspend fun answer(request: PendingRequest, value: JsonObject): Boolean =
+        withContext(Dispatchers.IO) {
+            val clientId = _clientId.value ?: return@withContext false
+            runCatching {
+                client.call(
+                    "\$events/result",
+                    buildJsonObject {
+                        put("clientId", clientId)
+                        put("eventId", request.eventId)
+                        put(
+                            "outcome",
+                            buildJsonObject {
+                                put("kind", "result")
+                                put("value", value)
+                            },
+                        )
+                    },
+                )
+                true
+            }.getOrElse { error ->
+                // A real failure must be visible: silence here is what made a
+                // rejected answer look like a dead channel.
+                _lastError.value = error.message ?: "提交失败"
+                false
+            }
+        }
 
     /** Decline a request so the Host can continue past it. */
-    fun decline(request: PendingRequest): Boolean {
-        val clientId = _clientId.value ?: return false
-        return runCatching {
-            client.call(
-                "\$events/result",
-                buildJsonObject {
-                    put("clientId", clientId)
-                    put("eventId", request.eventId)
-                    put("outcome", buildJsonObject { put("kind", "next") })
-                },
-            )
-            true
-        }.getOrDefault(false)
-    }
+    suspend fun decline(request: PendingRequest): Boolean =
+        withContext(Dispatchers.IO) {
+            val clientId = _clientId.value ?: return@withContext false
+            runCatching {
+                client.call(
+                    "\$events/result",
+                    buildJsonObject {
+                        put("clientId", clientId)
+                        put("eventId", request.eventId)
+                        put("outcome", buildJsonObject { put("kind", "next") })
+                    },
+                )
+                true
+            }.getOrElse { error ->
+                _lastError.value = error.message ?: "放弃请求失败"
+                false
+            }
+        }
 
     private fun parseWaterfall(frame: JsonObject): PendingRequest? {
         val event = JsonText.string(frame["event"]) ?: return null

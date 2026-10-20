@@ -169,6 +169,33 @@ class DshRepository(private val client: DshClient) {
             loadPage(sessionId, cursor, maxMessages)
         }
 
+    /**
+     * Read a session's live projections.
+     *
+     * The follow stream only pushes projections on its opening snapshot, so values
+     * that change later — token usage, context pressure, stats — stayed frozen at
+     * whatever they were when the app attached. After `/compact` that meant the
+     * session-info sheet kept showing the pre-compaction context size. This is the
+     * authoritative read the web client uses for the same panel.
+     */
+    suspend fun projections(sessionId: String): ProjectionSnapshot? =
+        withContext(Dispatchers.IO) {
+            val value = runCatching {
+                client.call(
+                    "session/projections",
+                    buildJsonObject { put("request", buildJsonObject { put("sessionId", sessionId) }) },
+                )
+            }.getOrNull() ?: return@withContext null
+            val obj = value as? JsonObject ?: return@withContext null
+            ProjectionSnapshot(
+                asOfSeq = JsonText.long(obj["asOfSeq"]) ?: 0L,
+                values = obj["values"] as? JsonObject ?: JsonObject(emptyMap()),
+            )
+        }
+
+    /** One `session/projections` answer: revision plus the value bag. */
+    data class ProjectionSnapshot(val asOfSeq: Long, val values: JsonObject)
+
     // ------------------------------------------------------------- commands
 
     /** List the slash commands this session's host offers. */

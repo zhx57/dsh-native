@@ -2,29 +2,51 @@ package dev.dsh.nativeapp.ui.chat
 
 import dev.dsh.nativeapp.data.TimelineItem
 
+/** One turn's first row, so a tap can land exactly on the turn's opening. */
+data class TurnAnchor(val turn: Int, val rowIndex: Int)
+
 /**
- * List-row indices of the items that count as a "message".
+ * First row of every turn in the loaded timeline.
  *
- * A turn produces one user row, one assistant row and then one row per tool call;
- * stepping row by row therefore moved a few pixels per tap. Navigation instead
- * jumps between these anchors.
+ * The fold emits a [TimelineItem.TurnDivider] at each `turn/start` after the first,
+ * so the ladder is derived from those markers instead of guessing from message
+ * counts: a turn with no user row (a steered message waking it) still gets an
+ * anchor, and a turn that only ran tools still appears.
+ *
+ * The head anchor takes the first divider's turn minus one, because everything
+ * above that divider belongs to the preceding turn. This keeps the numbers honest
+ * when history paging has not reached the log start yet: the window may begin in
+ * turn 30, and labelling that head "1" would misreport where the reader is.
  */
-fun messageAnchors(timeline: List<TimelineItem>): List<Int> =
-    timeline.indices.filter { index ->
-        when (timeline[index]) {
-            is TimelineItem.UserMessage -> true
-            is TimelineItem.AssistantMessage -> true
-            else -> false
-        }
+fun turnAnchors(timeline: List<TimelineItem>): List<TurnAnchor> {
+    if (timeline.isEmpty()) return emptyList()
+    val dividers = timeline.mapIndexedNotNull { index, item ->
+        if (item is TimelineItem.TurnDivider && index > 0) TurnAnchor(item.turn, index) else null
     }
+    val headTurn = dividers.firstOrNull()?.turn?.minus(1)?.coerceAtLeast(1) ?: 1
+    return buildList {
+        add(TurnAnchor(turn = headTurn, rowIndex = 0))
+        addAll(dividers)
+    }
+}
 
-/** First anchor strictly above [visibleTop], or null at the top of the list. */
-fun anchorBefore(anchors: List<Int>, visibleTop: Int): Int? =
-    anchors.lastOrNull { it < visibleTop }
+/**
+ * Turn whose row range contains [rowIndex].
+ *
+ * The last anchor at or above the row wins, which is what makes the counter read
+ * the turn you are actually looking at even when the viewport sits mid-turn among
+ * dozens of tool rows.
+ */
+fun currentTurn(anchors: List<TurnAnchor>, rowIndex: Int): Int? =
+    anchors.lastOrNull { it.rowIndex <= rowIndex }?.turn
 
-/** First anchor strictly below the visible bottom row, or null at the tail. */
-fun anchorAfter(anchors: List<Int>, visibleBottom: Int): Int? =
-    anchors.firstOrNull { it > visibleBottom }
+/** Anchor strictly above [topRow], for the up arrow. */
+fun previousTurn(anchors: List<TurnAnchor>, topRow: Int): TurnAnchor? =
+    anchors.lastOrNull { it.rowIndex < topRow }
 
-/** Last anchor in the transcript, used by the jump-to-latest arrow. */
-fun lastAnchor(anchors: List<Int>): Int? = anchors.lastOrNull()
+/** Anchor strictly below [bottomRow], for the down arrow. */
+fun nextTurn(anchors: List<TurnAnchor>, bottomRow: Int): TurnAnchor? =
+    anchors.firstOrNull { it.rowIndex > bottomRow }
+
+/** Final anchor, used by jump-to-latest. */
+fun latestTurn(anchors: List<TurnAnchor>): TurnAnchor? = anchors.lastOrNull()

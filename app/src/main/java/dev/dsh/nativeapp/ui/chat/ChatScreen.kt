@@ -54,6 +54,9 @@ import dev.dsh.nativeapp.ui.theme.DshRadius
 import dev.dsh.nativeapp.ui.theme.DshSpacing
 import dev.dsh.nativeapp.ui.theme.LocalDshColors
 
+/** Rows the list prepends before the timeline itself. */
+private const val HeadRows = 1
+
 /** Native transcript for one session, with the composer docked underneath. */
 @Composable
 fun ChatScreen(
@@ -97,6 +100,11 @@ fun ChatScreen(
     // "Following" means the newest row is actually rendered in the viewport, not
     // merely that the index is near the end: a short last row or a tall item can
     // make `lastVisible >= total - 2` true while the operator has scrolled up.
+    //
+    // This only ever turns following back ON — it is how the operator resumes
+    // following by scrolling to the bottom themselves. Turning it off on drag is
+    // handled separately below, because a selection drag and a deliberate scroll-up
+    // both flip `isScrollInProgress`.
     LaunchedEffect(listState) {
         snapshotFlow { listState.layoutInfo }
             .collect { info ->
@@ -104,20 +112,28 @@ fun ChatScreen(
                 if (visible.isEmpty() || info.totalItemsCount == 0) return@collect
                 val last = visible.last()
                 val viewportEnd = info.viewportEndOffset - info.afterContentPadding
-                // Following only when the final row's bottom is at or above the fold.
-                followTail = last.index >= info.totalItemsCount - 1 &&
+                val atBottom = last.index >= info.totalItemsCount - 1 &&
                     last.offset + last.size <= viewportEnd + 1
+                if (atBottom) followTail = true
             }
     }
 
-    // Any drag by the operator takes ownership of the viewport and suspends
-    // auto-follow until they ask to return to the tail. Without this, a selection
-    // being dragged was still racing the follow effect, which is what pulled the
-    // screen down mid-copy.
+    // A deliberate scroll upward hands the viewport to the operator, so incoming
+    // messages cannot yank them back down mid-read. Scrolling back to the bottom
+    // re-arms following (the effect above), which is what makes manual scrolling
+    // feel normal again instead of permanently losing auto-follow.
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }
-            .collect { dragging ->
-                if (dragging) followTail = false
+            .collect { scrolling ->
+                if (!scrolling) return@collect
+                val info = listState.layoutInfo
+                val visible = info.visibleItemsInfo
+                if (visible.isEmpty()) return@collect
+                val last = visible.last()
+                val viewportEnd = info.viewportEndOffset - info.afterContentPadding
+                val atBottom = last.index >= info.totalItemsCount - 1 &&
+                    last.offset + last.size <= viewportEnd + 1
+                if (!atBottom) followTail = false
             }
     }
 
@@ -150,17 +166,21 @@ fun ChatScreen(
     }
 
     // Load earlier history when the operator reaches the top. The follow stream only
-    // replays the newest window, so without this the transcript simply ended. Index 0
-    // is the leading indicator row, so the real first message sits at index 1.
-    LaunchedEffect(listState, hasMoreHistory) {
+    // replays the newest window, so without this the transcript simply ended.
+    //
+    // The trigger requires the head indicator itself to be on screen AND the list to
+    // actually be scrolled to its top. Firing on `first <= 1` alone meant the request
+    // repeated while a page was in flight and, worse, fired again the instant a
+    // prepend finished — which kept the spinner cycling and made the "已经是最早"
+    // notice appear while older messages still existed.
+    LaunchedEffect(listState, hasMoreHistory, loadingOlder) {
+        if (!hasMoreHistory || loadingOlder) return@LaunchedEffect
         snapshotFlow {
             // Read from the state object: the offset lives there, not on layoutInfo.
             listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
         }
-            .collect { pair ->
-                val first = pair.first
-                val offset = pair.second
-                if (first <= 1 && offset < 64) onLoadOlder()
+            .collect { (first, offset) ->
+                if (first == 0 && offset < 48) onLoadOlder()
             }
     }
 
@@ -226,31 +246,40 @@ fun ChatScreen(
                 }
             }
 
-            val anchors = remember(state.timeline) { messageAnchors(state.timeline) }
+            val anchors = remember(state.timeline) { turnAnchors(state.timeline) }
             val firstVisible = listState.firstVisibleItemIndex
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: firstVisible
+            // Index 0 is the history-head row, so the timeline is offset by one.
+            val timelineFirst = (firstVisible - HeadRows).coerceAtLeast(0)
+            val timelineLast = (lastVisible - HeadRows).coerceAtLeast(0)
+            val here = currentTurn(anchors, timelineLast)
 
-            TranscriptNavigator(
-                canGoUp = anchorBefore(anchors, firstVisible) != null,
-                canGoDown = anchorAfter(anchors, lastVisible) != null,
+            TurnNavigator(
+                currentTurn = here,
+                totalTurns = anchors.size,
+                canGoUp = previousTurn(anchors, timelineFirst) != null,
+                canGoDown = nextTurn(anchors, timelineLast) != null,
                 showJumpToLatest = !followTail && anchors.isNotEmpty(),
                 onPrevious = {
-                    anchorBefore(anchors, listState.firstVisibleItemIndex)?.let { target ->
-                        scope.launch { listState.animateScrollToItem(target) }
-                    }
+                    previousTurn(anchors, (listState.firstVisibleItemIndex - HeadRows).coerceAtLeast(0))
+                        ?.let { target ->
+                            followTail = false
+                            scope.launch { listState.animateScrollToItem(target.rowIndex + HeadRows) }
+                        }
                 },
                 onNext = {
-                    val bottom = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index
-                        ?: listState.firstVisibleItemIndex
-                    anchorAfter(anchors, bottom)?.let { target ->
-                        scope.launch { listState.animateScrollToItem(target) }
+                    val bottom = (listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index
+                        ?: listState.firstVisibleItemIndex) - HeadRows
+                    nextTurn(anchors, bottom.coerceAtLeast(0))?.let { target ->
+                        followTail = false
+                        scope.launch { listState.animateScrollToItem(target.rowIndex + HeadRows) }
                     }
                 },
                 onJumpToLatest = {
-                    lastAnchor(anchors)?.let { target ->
+                    latestTurn(anchors)?.let { target ->
                         scope.launch {
                             followTail = true
-                            listState.animateScrollToItem(target)
+                            listState.animateScrollToItem(target.rowIndex + HeadRows)
                         }
                     }
                 },
