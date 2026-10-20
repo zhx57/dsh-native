@@ -19,13 +19,17 @@ android {
     }
 
     signingConfigs {
+        // A stable signing key is committed so repeated CI builds upgrade in
+        // place on the phone instead of demanding an uninstall. Override with
+        // DSH_KEYSTORE_PATH when a private key is supplied through CI secrets.
         create("release") {
-            val store = System.getenv("DSH_KEYSTORE_PATH")
-            if (store != null) {
-                storeFile = file(store)
-                storePassword = System.getenv("DSH_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("DSH_KEY_ALIAS")
-                keyPassword = System.getenv("DSH_KEY_PASSWORD")
+            val external = System.getenv("DSH_KEYSTORE_PATH")
+            val storeFile = if (external != null) file(external) else rootProject.file("keystore/dsh-release.jks")
+            if (storeFile.exists()) {
+                this.storeFile = storeFile
+                storePassword = System.getenv("DSH_KEYSTORE_PASSWORD") ?: "dshnative2026"
+                keyAlias = System.getenv("DSH_KEY_ALIAS") ?: "dsh"
+                keyPassword = System.getenv("DSH_KEY_PASSWORD") ?: "dshnative2026"
             }
         }
     }
@@ -35,7 +39,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            if (System.getenv("DSH_KEYSTORE_PATH") != null) {
+            if (signingConfigs.getByName("release").storeFile != null) {
                 signingConfig = signingConfigs.getByName("release")
             }
         }

@@ -10,4 +10,3 @@ captures/
 *.apk
 *.aab
 !gradle/wrapper/gradle-wrapper.jar
-dsh-release.jks
