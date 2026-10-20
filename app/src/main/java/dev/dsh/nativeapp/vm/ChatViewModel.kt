@@ -53,7 +53,28 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         refreshCatalog()
         followWorkspaces()
         loadPermissionOptions()
+        startIndexPolling()
     }
+
+    /**
+     * Keep the drawer current.
+     *
+     * The session index is a unary RPC with no push channel, so titles, running
+     * flags and ordering only change when it is re-read. A slow poll keeps the list
+     * honest while the app is open, and the drawer refreshes on open as well.
+     */
+    private fun startIndexPolling() {
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(8_000)
+                if (_chat.value.sessionId == null) continue
+                runCatching { repo.listSessions() }.onSuccess(::applySessions)
+            }
+        }
+    }
+
+    /** Re-read the index; called when the drawer opens so the list is never stale. */
+    fun refreshIndexNow() = refreshIndex()
 
     // -------------------------------------------------------------- index
 
@@ -61,19 +82,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         viewModelScope.launch {
             runCatching { repo.listSessions() }
                 .onSuccess { summaries ->
-                    _sessions.value = summaries
-                        .filter { it.parentSessionId == null }
-                        .map { summary ->
-                            SessionRow(
-                                sessionId = summary.sessionId,
-                                title = summary.title,
-                                subtitle = summary.cwd?.substringAfterLast('\\')?.substringAfterLast('/') ?: "",
-                                running = summary.running,
-                                updatedAt = summary.updatedAt,
-                            )
-                        }
-                        .sortedByDescending { it.updatedAt }
-                    regroup()
+                    applySessions(summaries)
                     openMostRecentIfIdle()
                 }
                 .onFailure { error ->
@@ -83,6 +92,23 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                     )
                 }
         }
+    }
+
+    /** Fold one `session/list` answer into the drawer rows and regroup. */
+    private suspend fun applySessions(summaries: List<SessionSummary>) {
+        _sessions.value = summaries
+            .filter { it.parentSessionId == null }
+            .map { summary ->
+                SessionRow(
+                    sessionId = summary.sessionId,
+                    title = summary.title,
+                    subtitle = summary.cwd?.substringAfterLast('\\')?.substringAfterLast('/') ?: "",
+                    running = summary.running,
+                    updatedAt = summary.updatedAt,
+                )
+            }
+            .sortedByDescending { it.updatedAt }
+        regroup()
     }
 
     /** Turn transport and gateway failures into something actionable. */

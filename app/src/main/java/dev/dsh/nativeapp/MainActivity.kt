@@ -138,7 +138,16 @@ private fun DshRoot(
     // `return` tore down ChatScreen, which discarded its LazyListState and its
     // follow-the-tail flag — that is why coming back landed on a stale offset
     // instead of the newest message.
-    Box(Modifier.fillMaxSize()) {
+    // Selection handles and the floating toolbar live in a Compose popup window
+    // that always draws above Activity content, so they would float over the
+    // settings overlay or the drawer. Selection is disabled while any overlay is
+    // open; the transcript itself stays selectable.
+    val overlayOpen = showSettings || showPlusMenu || showPermission || showInfo || showModelPicker
+
+    androidx.compose.runtime.CompositionLocalProvider(
+        dev.dsh.nativeapp.ui.chat.LocalTextSelectable provides !overlayOpen,
+    ) {
+        Box(Modifier.fillMaxSize()) {
     // Prefer the session's own selection; the catalog default only applies before
     // the first snapshot arrives.
     val activeProvider = chat.modelProvider ?: catalog?.default?.provider
@@ -176,6 +185,7 @@ private fun DshRoot(
         onPlusClick = { showPlusMenu = true },
         attachmentNames = attachments.map { it.first },
         onRemoveAttachment = { vm.removeAttachment(it) },
+        onDrawerOpen = { vm.refreshIndexNow() },
     )
 
     if (showPlusMenu) {
@@ -229,7 +239,22 @@ private fun DshRoot(
     }
 
         // Settings overlays the transcript so ChatScreen keeps its list state.
-        if (showSettings) {
+        // It is animated in and out: an instant swap read as a dropped frame.
+        androidx.compose.animation.AnimatedVisibility(
+            visible = showSettings,
+            enter = androidx.compose.animation.fadeIn(
+                animationSpec = androidx.compose.animation.core.tween(160),
+            ) + androidx.compose.animation.slideInHorizontally(
+                animationSpec = androidx.compose.animation.core.tween(200),
+                initialOffsetX = { it / 6 },
+            ),
+            exit = androidx.compose.animation.fadeOut(
+                animationSpec = androidx.compose.animation.core.tween(140),
+            ) + androidx.compose.animation.slideOutHorizontally(
+                animationSpec = androidx.compose.animation.core.tween(180),
+                targetOffsetX = { it / 6 },
+            ),
+        ) {
             Box(Modifier.fillMaxSize().background(LocalDshColors.current.bgBase)) {
                 SettingsScreen(
                     host = host,
@@ -244,6 +269,7 @@ private fun DshRoot(
                     },
                 )
             }
+        }
         }
     }
 }

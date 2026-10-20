@@ -46,6 +46,7 @@ import dev.dsh.nativeapp.ui.theme.LocalDshColors
 @Composable
 fun UserTurn(item: TimelineItem.UserMessage) {
     val colors = LocalDshColors.current
+    val selectable = LocalTextSelectable.current
     val text = item.blocks.filterIsInstance<ContentBlock.Text>().joinToString("\n") { it.text }
     val bubbleWidth = LocalConfiguration.current.screenWidthDp.dp * 0.82f
 
@@ -59,7 +60,16 @@ fun UserTurn(item: TimelineItem.UserMessage) {
                 .background(colors.bubble, RoundedCornerShape(DshRadius.xl.dp))
                 .padding(horizontal = DshSpacing.lg.dp, vertical = DshSpacing.md.dp),
         ) {
-            SelectionContainer {
+            if (selectable) {
+                SelectionContainer {
+                    Text(
+                        text = text,
+                        fontSize = 15.sp,
+                        lineHeight = 24.sp,
+                        color = colors.labelPrimary,
+                    )
+                }
+            } else {
                 Text(
                     text = text,
                     fontSize = 15.sp,
@@ -74,6 +84,7 @@ fun UserTurn(item: TimelineItem.UserMessage) {
 /** Assistant turn: reasoning plus body, both selectable. */
 @Composable
 fun AssistantTurn(item: TimelineItem.AssistantMessage) {
+    val selectable = LocalTextSelectable.current
     val textBlocks = item.blocks.filterIsInstance<ContentBlock.Text>()
     val reasoning = item.blocks.filterIsInstance<ContentBlock.Reasoning>().joinToString("\n\n") { it.text }
 
@@ -84,17 +95,26 @@ fun AssistantTurn(item: TimelineItem.AssistantMessage) {
         if (reasoning.isNotBlank()) {
             ReasoningBlock(reasoning, item.streaming)
         }
-        SelectionContainer {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                textBlocks.forEach { block ->
-                    if (block.text.isNotBlank()) {
-                        MarkdownText(source = block.text, modifier = Modifier.fillMaxWidth())
-                    }
-                }
+        if (selectable) {
+            SelectionContainer {
+                AssistantBody(textBlocks)
             }
+        } else {
+            AssistantBody(textBlocks)
         }
         if (item.streaming) {
             TypingIndicator()
+        }
+    }
+}
+
+@Composable
+private fun AssistantBody(textBlocks: List<ContentBlock.Text>) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        textBlocks.forEach { block ->
+            if (block.text.isNotBlank()) {
+                MarkdownText(source = block.text, modifier = Modifier.fillMaxWidth())
+            }
         }
     }
 }

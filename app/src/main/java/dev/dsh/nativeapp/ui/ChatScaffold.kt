@@ -73,6 +73,7 @@ fun ChatScaffold(
     onPlusClick: () -> Unit,
     attachmentNames: List<String>,
     onRemoveAttachment: (Int) -> Unit,
+    onDrawerOpen: () -> Unit = {},
 ) {
     val colors = LocalDshColors.current
     var drawerOpen by remember { mutableStateOf(false) }
@@ -85,7 +86,12 @@ fun ChatScaffold(
             TopBar(
                 title = state.title.ifBlank { "DSH" },
                 running = state.running,
-                onMenu = { drawerOpen = true },
+                onMenu = {
+                    // Refresh on open: the index has no push channel, so this is the
+                    // moment the operator expects it to be current.
+                    onDrawerOpen()
+                    drawerOpen = true
+                },
                 onNewSession = onNewSession,
                 onInfo = onInfo,
             )
