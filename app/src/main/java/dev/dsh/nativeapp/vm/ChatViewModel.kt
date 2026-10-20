@@ -78,9 +78,31 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
             },
         )
         viewModelScope.launch {
+            // The Host's own running flag drives the send/stop button. Deriving it
+            // from turn/start and turn/end drifted whenever an event was missed, and
+            // a stop with a stale flag either did nothing or cancelled the wrong turn.
+            channel.status.collect { (sessionId, running) ->
+                if (sessionId == _chat.value.sessionId) {
+                    _chat.value = _chat.value.copy(running = running)
+                }
+                // Keep the drawer's spinner honest too.
+                _sessions.value = _sessions.value.map { row ->
+                    if (row.sessionId == sessionId) row.copy(running = running) else row
+                }
+                regroup()
+            }
+        }
+        viewModelScope.launch {
             channel.requests.collect { request ->
                 when (request) {
                     is PendingRequest.Question -> {
+                        // Only surface a question for the conversation on screen.
+                        // Stale requests from earlier sessions pile up on `$events`
+                        // and would otherwise pop up over an unrelated transcript.
+                        val active = _chat.value.sessionId
+                        if (active != null && request.agentId != null && request.agentId != active) {
+                            return@collect
+                        }
                         _chat.value = _chat.value.copy(
                             liveQuestion = LiveQuestion(
                                 eventId = request.eventId,
@@ -388,7 +410,12 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         )
     }
 
-    /** Read running state from the events the stream carries. */
+    /**
+     * Fallback only: `api-session/status` on `$events` is authoritative, but it is
+     * missed if the app attached after a turn started. Reading `turn/start` and
+     * `turn/end` from the session log recovers that case; it never overrides a
+     * pushed flag because the push is delivered later in the same tick.
+     */
     private fun detectRunning(value: JsonObject): Boolean? {
         if (dev.dsh.nativeapp.data.JsonText.string(value["type"]) != "event") return null
         val event = value["event"] as? JsonObject ?: return null

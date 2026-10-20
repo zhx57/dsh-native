@@ -39,6 +39,15 @@ class DshEvents(private val client: DshClient) {
     /** Interactive requests waiting for an answer. */
     val requests: SharedFlow<PendingRequest> = _requests
 
+    private val _status = MutableSharedFlow<Pair<String, Boolean>>(
+        replay = 0,
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /** Session id to running flag, from the Host's `api-session/status` event. */
+    val status: SharedFlow<Pair<String, Boolean>> = _status
+
     private var stream: DshStream? = null
 
     /** Open the channel. Idempotent; call [close] to detach. */
@@ -58,6 +67,20 @@ class DshEvents(private val client: DshClient) {
                         onReady()
                     }
                     "waterfall" -> parseWaterfall(frame)?.let { _requests.tryEmit(it) }
+                    // Authoritative running flag: the Host emits this from
+                    // `agent/status`, so it is the same signal the web UI trusts for
+                    // its send/stop button. Inferring from turn/start and turn/end
+                    // drifts whenever an event is missed or a turn is resumed.
+                    "emit" -> {
+                        if (JsonText.string(frame["event"]) == "api-session/status") {
+                            val args = frame["args"] as? JsonArray ?: frame["payload"] as? JsonArray
+                            val sessionId = args?.getOrNull(0)?.let(JsonText::string)
+                            val running = args?.getOrNull(1)?.let(JsonText::bool)
+                            if (sessionId != null && running != null) {
+                                _status.tryEmit(sessionId to running)
+                            }
+                        }
+                    }
                     else -> Unit
                 }
             },
