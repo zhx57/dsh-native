@@ -1,10 +1,12 @@
 package dev.dsh.nativeapp.ui.chat
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -39,6 +41,7 @@ fun ChatScreen(
     onSend: (String) -> Unit,
     onStop: () -> Unit,
     onModelClick: () -> Unit,
+    onDismissError: () -> Unit,
     contentPadding: PaddingValues,
 ) {
     val colors = LocalDshColors.current
@@ -68,7 +71,7 @@ fun ChatScreen(
     ) {
         Box(Modifier.weight(1f)) {
             if (state.timeline.isEmpty() && !state.connecting) {
-                EmptyTranscript(state.title)
+                if (state.sessionId == null) NoSessionState() else EmptyTranscript(state.title)
             }
 
             LazyColumn(
@@ -105,14 +108,27 @@ fun ChatScreen(
         }
 
         if (state.error != null) {
-            Text(
-                text = state.error,
-                fontSize = 12.sp,
-                color = colors.stateError,
-                modifier = Modifier
+            Row(
+                Modifier
                     .fillMaxWidth()
                     .padding(horizontal = DshSpacing.lg.dp, vertical = 4.dp),
-            )
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = state.error,
+                    fontSize = 12.sp,
+                    color = colors.stateError,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = "关闭",
+                    fontSize = 12.sp,
+                    color = colors.labelTertiary,
+                    modifier = Modifier
+                        .clickable(onClick = onDismissError)
+                        .padding(start = 10.dp, top = 2.dp, bottom = 2.dp),
+                )
+            }
         }
 
         Composer(
@@ -146,6 +162,28 @@ private fun EmptyTranscript(title: String) {
             Spacer(Modifier.height(6.dp))
             Text(
                 text = "说点什么开始这一轮",
+                fontSize = 13.sp,
+                color = colors.labelTertiary,
+            )
+        }
+    }
+}
+
+/** Shown when the host answered but the workspace has no session yet. */
+@Composable
+private fun NoSessionState() {
+    val colors = LocalDshColors.current
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = "还没有会话",
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Medium,
+                color = colors.labelPrimary,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "点右上角 + 新建一个",
                 fontSize = 13.sp,
                 color = colors.labelTertiary,
             )

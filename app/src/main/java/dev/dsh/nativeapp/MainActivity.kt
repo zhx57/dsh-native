@@ -124,6 +124,7 @@ private fun DshRoot(
         onSend = { vm.send(it) },
         onStop = { vm.stop() },
         onModelClick = { showModelPicker = true },
+        onDismissError = { vm.dismissError() },
     )
 
     if (showModelPicker) {

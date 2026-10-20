@@ -69,10 +69,22 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                 .onFailure { error ->
                     _chat.value = _chat.value.copy(
                         connecting = false,
-                        error = error.message ?: "无法读取会话列表",
+                        error = describe(error, "无法读取会话列表"),
                     )
                 }
         }
+    }
+
+    /** Turn transport and gateway failures into something actionable. */
+    private fun describe(error: Throwable, fallback: String): String = when {
+        error is dev.dsh.nativeapp.data.DshRemoteException && error.code.startsWith("transport/http-401") ->
+            "配对已过期，返回设置重新连接"
+        error is dev.dsh.nativeapp.data.DshRemoteException && error.code.startsWith("transport/http-403") ->
+            "主机拒绝了该请求（Host 校验失败）"
+        error is java.net.UnknownHostException || error is java.net.ConnectException ->
+            "连不上主机，检查地址和网络"
+        error is java.net.SocketTimeoutException -> "主机响应超时"
+        else -> error.message ?: fallback
     }
 
     /**
@@ -145,7 +157,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                 viewModelScope.launch {
                     _chat.value = _chat.value.copy(
                         connecting = false,
-                        error = error.message ?: "连接中断",
+                        error = describe(error, "连接中断"),
                     )
                 }
             },
@@ -190,7 +202,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                     openSession(id)
                 }
                 .onFailure { error ->
-                    _chat.value = _chat.value.copy(error = error.message ?: "无法创建会话")
+                    _chat.value = _chat.value.copy(error = describe(error, "无法创建会话"))
                 }
         }
     }
@@ -208,7 +220,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                     refreshIndexSoon()
                 }
                 .onFailure { error ->
-                    _chat.value = _chat.value.copy(error = error.message ?: "发送失败")
+                    _chat.value = _chat.value.copy(error = describe(error, "发送失败"))
                 }
         }
     }
@@ -225,7 +237,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         viewModelScope.launch {
             runCatching { repo.cancelSession(sessionId) }
                 .onFailure { error ->
-                    _chat.value = _chat.value.copy(error = error.message ?: "取消失败")
+                    _chat.value = _chat.value.copy(error = describe(error, "取消失败"))
                 }
         }
     }
@@ -241,7 +253,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
             runCatching { repo.selectModel(sessionId, provider, model, reasoningEffort) }
                 .onSuccess { refreshCatalog() }
                 .onFailure { error ->
-                    _chat.value = _chat.value.copy(error = error.message ?: "切换模型失败")
+                    _chat.value = _chat.value.copy(error = describe(error, "切换模型失败"))
                 }
         }
     }

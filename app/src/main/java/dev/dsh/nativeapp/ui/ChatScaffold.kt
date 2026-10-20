@@ -58,6 +58,7 @@ fun ChatScaffold(
     onSend: (String) -> Unit,
     onStop: () -> Unit,
     onModelClick: () -> Unit,
+    onDismissError: () -> Unit,
 ) {
     val colors = LocalDshColors.current
     var drawerOpen by remember { mutableStateOf(false) }
@@ -76,6 +77,7 @@ fun ChatScaffold(
                 onSend = onSend,
                 onStop = onStop,
                 onModelClick = onModelClick,
+                onDismissError = onDismissError,
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
             )
         }
