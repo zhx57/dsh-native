@@ -1,7 +1,7 @@
 package dev.dsh.nativeapp.ui.chat
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,17 +14,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.dsh.nativeapp.data.ContentBlock
@@ -34,13 +29,15 @@ import dev.dsh.nativeapp.ui.theme.DshRadius
 import dev.dsh.nativeapp.ui.theme.DshSpacing
 import dev.dsh.nativeapp.ui.theme.LocalDshColors
 
-/** Operator turn: right-aligned bubble, matching the web transcript. */
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+/**
+ * Operator turn: right-aligned bubble, matching the web transcript.
+ *
+ * Text is selectable so a phrase can be copied with the system handles; the
+ * transcript deliberately carries no per-message button row, which on a small
+ * screen cost more height than the content.
+ */
 @Composable
-fun UserTurn(
-    item: TimelineItem.UserMessage,
-    onLongPress: (TimelineItem.UserMessage) -> Unit = {},
-) {
+fun UserTurn(item: TimelineItem.UserMessage) {
     val colors = LocalDshColors.current
     val text = item.blocks.filterIsInstance<ContentBlock.Text>().joinToString("\n") { it.text }
     val bubbleWidth = LocalConfiguration.current.screenWidthDp.dp * 0.82f
@@ -53,70 +50,44 @@ fun UserTurn(
             Modifier
                 .widthIn(max = bubbleWidth)
                 .background(colors.bubble, RoundedCornerShape(DshRadius.xl.dp))
-                .combinedClickable(
-                    onClick = {},
-                    onLongClick = { onLongPress(item) },
-                )
                 .padding(horizontal = DshSpacing.lg.dp, vertical = DshSpacing.md.dp),
         ) {
-            Text(
-                text = text,
-                fontSize = 15.sp,
-                lineHeight = 24.sp,
-                color = colors.labelPrimary,
-            )
+            SelectionContainer {
+                Text(
+                    text = text,
+                    fontSize = 15.sp,
+                    lineHeight = 24.sp,
+                    color = colors.labelPrimary,
+                )
+            }
         }
     }
 }
 
-/** Assistant turn: full-width content with reasoning, text and an action row. */
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+/** Assistant turn: reasoning plus body, both selectable. */
 @Composable
-fun AssistantTurn(
-    item: TimelineItem.AssistantMessage,
-    onLongPress: (TimelineItem.AssistantMessage) -> Unit = {},
-) {
-    val colors = LocalDshColors.current
-    val clipboard = LocalClipboardManager.current
+fun AssistantTurn(item: TimelineItem.AssistantMessage) {
     val textBlocks = item.blocks.filterIsInstance<ContentBlock.Text>()
     val reasoning = item.blocks.filterIsInstance<ContentBlock.Reasoning>().joinToString("\n\n") { it.text }
 
     Column(
-        Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = {},
-                onLongClick = { onLongPress(item) },
-            ),
+        Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         if (reasoning.isNotBlank()) {
             ReasoningBlock(reasoning, item.streaming)
         }
-        textBlocks.forEach { block ->
-            if (block.text.isNotBlank()) {
-                MarkdownText(source = block.text, modifier = Modifier.fillMaxWidth())
-            }
-        }
-        if (item.streaming && textBlocks.isEmpty()) {
-            TypingIndicator()
-        }
-        if (!item.streaming && textBlocks.isNotEmpty()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(
-                    onClick = {
-                        clipboard.setText(AnnotatedString(textBlocks.joinToString("\n\n") { it.text }))
-                    },
-                    modifier = Modifier.size(30.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.ContentCopy,
-                        contentDescription = "复制",
-                        tint = colors.labelTertiary,
-                        modifier = Modifier.size(15.dp),
-                    )
+        SelectionContainer {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                textBlocks.forEach { block ->
+                    if (block.text.isNotBlank()) {
+                        MarkdownText(source = block.text, modifier = Modifier.fillMaxWidth())
+                    }
                 }
             }
+        }
+        if (item.streaming) {
+            TypingIndicator()
         }
     }
 }

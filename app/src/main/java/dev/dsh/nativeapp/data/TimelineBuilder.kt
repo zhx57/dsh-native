@@ -294,17 +294,23 @@ class TimelineBuilder {
         )
     }
 
+    /**
+     * Retire the provisional streaming bubble.
+     *
+     * The committed `assistant/message` always supersedes the attempt that
+     * produced it, so the placeholder is removed whether or not it collected
+     * text — leaving it behind is what showed a stale "正在输出" row above the
+     * conversation and duplicated already-printed prose.
+     */
     private fun finalizeStreaming() {
         val attempt = streaming ?: return
         streaming = null
         val index = attempt.indexInList
         if (index < 0 || index >= items.size) return
-        val current = items.getOrNull(index) as? TimelineItem.AssistantMessage
-        if (current != null && current.blocks.isEmpty()) {
-            items.removeAt(index)
-            // Tool rows created during the attempt keep their positions; shift only
-            // entries recorded after the removed placeholder.
-            toolIndex.replaceAll { _, value -> if (value > index) value - 1 else value }
-        }
+        val current = items.getOrNull(index) as? TimelineItem.AssistantMessage ?: return
+        items.removeAt(index)
+        // Tool rows created during the attempt keep their order; only rows after
+        // the removed placeholder shift down one slot.
+        toolIndex.replaceAll { _, value -> if (value > index) value - 1 else value }
     }
 }

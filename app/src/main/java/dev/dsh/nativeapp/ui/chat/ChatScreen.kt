@@ -24,6 +24,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -93,8 +95,8 @@ fun ChatScreen(
             ) {
                 items(items = state.timeline, key = { keyOf(it) }) { item ->
                     when (item) {
-                        is TimelineItem.UserMessage -> UserTurn(item, onLongPress = { onBranch(it.seq) })
-                        is TimelineItem.AssistantMessage -> AssistantTurn(item, onLongPress = { onBranch(it.seq) })
+                        is TimelineItem.UserMessage -> UserTurn(item)
+                        is TimelineItem.AssistantMessage -> AssistantTurn(item)
                         is TimelineItem.ToolCallItem -> ToolCallCard(item)
                         is TimelineItem.TurnDivider -> TurnDivider(item.turn)
                         is TimelineItem.Notice -> Text(
@@ -158,6 +160,19 @@ fun ChatScreen(
                     horizontal = DshSpacing.md.dp,
                     vertical = DshSpacing.xs.dp,
                 ),
+            )
+        }
+
+        // One action row for the whole transcript. Per-message buttons cost a
+        // full line each on a watch-sized screen and pushed the composer down.
+        if (state.timeline.any { it is TimelineItem.AssistantMessage }) {
+            val clipboard = LocalClipboardManager.current
+            TranscriptActions(
+                onCopyAll = { clipboard.setText(AnnotatedString(plainTextOf(state.timeline))) },
+                onBranch = {
+                    branchSeqOf(state.timeline)?.let(onBranch)
+                },
+                modifier = Modifier.padding(horizontal = DshSpacing.md.dp),
             )
         }
 
