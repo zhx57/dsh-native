@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -121,13 +122,14 @@ fun TypingIndicator() {
     Row(verticalAlignment = Alignment.CenterVertically) {
         repeat(3) { index ->
             // Each dot peaks a third of a cycle apart, so the row reads as a wave.
-            val distance = (phase - index + 3f) % 3f
-            val active = distance < 1f
-            val scale = if (active) 1f - (distance * 0.45f) else 0.7f
+            // `index` is Int, so it is widened explicitly: mixing it into the Float
+            // arithmetic otherwise resolves to an ambiguous operator.
+            val distance = (phase - index.toFloat() + 3f) % 3f
+            val scale = if (distance < 1f) 1f - (distance * 0.45f) else 0.7f
             Box(
                 Modifier
                     .padding(end = 4.dp)
-                    .size((4 + 2 * scale).dp)
+                    .size((4f + 2f * scale).dp)
                     .background(
                         colors.labelTertiary.copy(alpha = 0.5f + 0.5f * scale),
                         RoundedCornerShape(DshRadius.full.dp),

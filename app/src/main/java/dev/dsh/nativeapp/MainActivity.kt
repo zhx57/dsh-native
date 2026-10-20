@@ -14,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.dsh.nativeapp.data.ChatUiState
 import dev.dsh.nativeapp.ui.ChatScaffold
@@ -104,14 +105,22 @@ private fun DshRoot(
     val permissions by vm.permissions.collectAsState()
     val attachments by vm.attachments.collectAsState()
 
+    // The launcher callback is not an Activity member scope, so the context is
+    // captured once as a local value.
+    val pickerContext = LocalContext.current
+
     // Image picker and generic file picker, both scoped to the current Activity.
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
-    ) { uri -> uri?.let { vm.addAttachment(displayNameOf(this, it), readBytesOf(this, it)) } }
+    ) { uri ->
+        uri?.let { vm.addAttachment(displayNameOf(pickerContext, it), readBytesOf(pickerContext, it)) }
+    }
 
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
-    ) { uri -> uri?.let { vm.addAttachment(displayNameOf(this, it), readBytesOf(this, it)) } }
+    ) { uri ->
+        uri?.let { vm.addAttachment(displayNameOf(pickerContext, it), readBytesOf(pickerContext, it)) }
+    }
 
     // Settings is a screen, not a destination the Activity should exit from:
     // back has to return to the transcript.
