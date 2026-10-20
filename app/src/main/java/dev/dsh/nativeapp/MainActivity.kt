@@ -182,7 +182,6 @@ private fun DshRoot(
         onBranch = { seq -> vm.branchFrom(seq) },
         onPermissionClick = { showPermission = true },
         onAnswerQuestions = { callId, answers -> vm.answerQuestions(callId, answers) },
-        onAnswerLive = { answers -> vm.answerLiveQuestion(answers) },
         onLoadOlder = { vm.loadOlderHistory() },
         onPlusClick = { showPlusMenu = true },
         attachmentNames = attachments.map { it.first },
@@ -239,6 +238,16 @@ private fun DshRoot(
             },
         )
     }
+
+        // A pending question takes the whole screen: the inline card could not be
+        // read or scrolled on a watch-sized viewport.
+        if (chat.liveQuestion != null) {
+            dev.dsh.nativeapp.ui.chat.LiveQuestionScreen(
+                question = chat.liveQuestion!!,
+                onSubmit = { answers -> vm.answerLiveQuestion(answers) },
+                onDismiss = { vm.dismissLiveQuestion() },
+            )
+        }
 
         // Settings overlays the transcript so ChatScreen keeps its list state.
         // It is animated in and out: an instant swap read as a dropped frame.

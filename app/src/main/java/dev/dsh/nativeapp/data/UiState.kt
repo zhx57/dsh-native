@@ -33,6 +33,8 @@ data class ChatUiState(
 /** A question delivered as a Host waterfall on `$events`. */
 data class LiveQuestion(
     val eventId: String,
+    /** Session that asked it, so it is not shown over a different conversation. */
+    val agentId: String? = null,
     val questions: List<QuestionPrompt>,
 )
 

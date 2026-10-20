@@ -69,7 +69,6 @@ fun ChatScreen(
     onBranch: (Long) -> Unit,
     onPermissionClick: () -> Unit,
     onAnswerQuestions: (String, Map<String, List<String>>) -> Unit,
-    onAnswerLive: (Map<String, List<String>>) -> Unit,
     onLoadOlder: () -> Unit,
     onPlusClick: () -> Unit,
     attachmentNames: List<String>,
@@ -247,17 +246,8 @@ fun ChatScreen(
             }
         }
 
-        // The authoritative interactive surface: questions pushed on $events.
-        if (state.liveQuestion != null) {
-            LiveQuestionCard(
-                question = state.liveQuestion,
-                onSubmit = onAnswerLive,
-                modifier = Modifier.padding(
-                    horizontal = DshSpacing.md.dp,
-                    vertical = DshSpacing.xs.dp,
-                ),
-            )
-        }
+        // Pending questions are answered on their own full-screen surface, not here:
+        // the composer column does not scroll, so an inline card was unusable.
 
         if (state.pendingApproval != null) {
             ApprovalCard(

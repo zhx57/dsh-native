@@ -84,6 +84,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                         _chat.value = _chat.value.copy(
                             liveQuestion = LiveQuestion(
                                 eventId = request.eventId,
+                                agentId = request.agentId,
                                 questions = request.questions,
                             ),
                         )
@@ -103,9 +104,13 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         }
     }
 
+    /** Hide the question panel without answering; the Host stays blocked. */
+    fun dismissLiveQuestion() {
+        _chat.value = _chat.value.copy(liveQuestion = null)
+    }
+
     /** Submit answers for the live question and clear the card. */
-    fun answerLiveQuestion(answers: Map<String, List<String>>) {
-        val live = _chat.value.liveQuestion ?: return
+    fun answerLiveQuestion(answers: Map<String, List<String>>) {        val live = _chat.value.liveQuestion ?: return
         val request = PendingRequest.Question(live.eventId, _chat.value.sessionId, live.questions)
         _chat.value = _chat.value.copy(liveQuestion = null)
         viewModelScope.launch {
@@ -320,11 +325,19 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         // Any session may have more history than the follow window replays, so
         // paging starts enabled and switches off once the host says so.
         _hasMoreHistory.value = true
+        // A pending question must survive session switching: the startup path opens
+        // the newest session right after `$events` delivers a waterfall, and wiping
+        // the state here made the card flash and vanish.
+        val carriedQuestion = _chat.value.liveQuestion
+        val carriedApproval = _chat.value.pendingApproval
         _chat.value = ChatUiState(
             sessionId = sessionId,
             connecting = true,
             title = if (keepTimeline) _chat.value.title else "",
             timeline = if (keepTimeline) _chat.value.timeline else emptyList(),
+            // Only carry a question that belongs to the session being opened.
+            liveQuestion = carriedQuestion?.takeIf { it.agentId == null || it.agentId == sessionId },
+            pendingApproval = carriedApproval,
         )
         loadCommands()
         val title = _sessions.value.firstOrNull { it.sessionId == sessionId }?.title.orEmpty()
