@@ -69,13 +69,19 @@ class DshRepository(private val client: DshClient) {
         Unit
     }
 
+    /**
+     * Switch the session's model and reasoning effort.
+     *
+     * @returns the selection the host actually applied, which may differ from the
+     *   request when a provider is unavailable.
+     */
     suspend fun selectModel(
         sessionId: String,
         provider: String,
         model: String,
         reasoningEffort: String?,
-    ) = withContext(Dispatchers.IO) {
-        client.call(
+    ): ModelRef = withContext(Dispatchers.IO) {
+        val value = client.call(
             "session/selectModel",
             buildJsonObject {
                 put("request", buildJsonObject {
@@ -86,7 +92,13 @@ class DshRepository(private val client: DshClient) {
                 })
             },
         )
-        Unit
+        val selected = JsonText.field(value, "selected")
+        ModelRef(
+            provider = JsonText.string(JsonText.field(selected, "provider")) ?: provider,
+            model = JsonText.string(JsonText.field(selected, "model")) ?: model,
+            reasoningEffort = JsonText.string(JsonText.field(selected, "reasoningEffort"))
+                ?: reasoningEffort,
+        )
     }
 
     /** Send a user prompt. [mode] is `queue` (default) or `steer`. */

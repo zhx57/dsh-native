@@ -610,11 +610,32 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
     }
 
     /** Switch the active session's model, then reload the catalog projection. */
+    /**
+     * Switch the model or reasoning effort.
+     *
+     * `session/selectModel` answers with the applied selection, so the UI is updated
+     * from that reply instead of waiting for the next `session/follow` snapshot —
+     * that wait is why the composer chip only changed after leaving and re-entering
+     * the screen.
+     */
     fun selectModel(provider: String, model: String, reasoningEffort: String?) {
         val sessionId = _chat.value.sessionId ?: return
+        // Optimistic: the picker closes immediately, so show the intent at once.
+        _chat.value = _chat.value.copy(
+            modelProvider = provider,
+            modelName = model,
+            reasoningEffort = reasoningEffort ?: _chat.value.reasoningEffort,
+        )
         viewModelScope.launch {
             runCatching { repo.selectModel(sessionId, provider, model, reasoningEffort) }
-                .onSuccess { refreshCatalog() }
+                .onSuccess { applied ->
+                    _chat.value = _chat.value.copy(
+                        modelProvider = applied.provider,
+                        modelName = applied.model,
+                        reasoningEffort = applied.reasoningEffort,
+                    )
+                    refreshCatalog()
+                }
                 .onFailure { error ->
                     _chat.value = _chat.value.copy(error = describe(error, "切换模型失败"))
                 }
