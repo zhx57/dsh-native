@@ -24,6 +24,26 @@ data class ChatUiState(
     val reasoningEffort: String? = null,
     val contextBreakdown: ContextBreakdown? = null,
     val sessionStats: SessionStats? = null,
+    /** `ask_user_question` batches awaiting an answer. */
+    val questions: List<PendingQuestion> = emptyList(),
+)
+
+/** One question inside an `ask_user_question` batch. */
+data class QuestionItem(
+    val id: String,
+    val question: String,
+    val detail: String? = null,
+    val header: String? = null,
+    val options: List<QuestionOption> = emptyList(),
+    val multiSelect: Boolean = false,
+)
+
+data class QuestionOption(val label: String, val description: String? = null)
+
+/** One `ask_user_question` call awaiting answers. */
+data class PendingQuestion(
+    val callId: String,
+    val questions: List<QuestionItem>,
 )
 
 /** Token split by prompt section, from `contextBreakdown`. */

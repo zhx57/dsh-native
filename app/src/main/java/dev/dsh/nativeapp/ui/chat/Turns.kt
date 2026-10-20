@@ -1,5 +1,11 @@
 package dev.dsh.nativeapp.ui.chat
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
@@ -92,20 +98,44 @@ fun AssistantTurn(item: TimelineItem.AssistantMessage) {
     }
 }
 
+/**
+ * Three-dot pulse shown while a step is generating.
+ *
+ * The dots animate rather than sitting still: a static "…" is indistinguishable
+ * from a frozen screen when a tool call takes a while.
+ */
 @Composable
 fun TypingIndicator() {
     val colors = LocalDshColors.current
+    val transition = rememberInfiniteTransition(label = "typing")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1050, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "dot",
+    )
+
     Row(verticalAlignment = Alignment.CenterVertically) {
         repeat(3) { index ->
+            // Each dot peaks a third of a cycle apart, so the row reads as a wave.
+            val distance = (phase - index + 3f) % 3f
+            val active = distance < 1f
+            val scale = if (active) 1f - (distance * 0.45f) else 0.7f
             Box(
                 Modifier
                     .padding(end = 4.dp)
-                    .size((4 + index).dp)
-                    .background(colors.labelTertiary, RoundedCornerShape(DshRadius.full.dp)),
+                    .size((4 + 2 * scale).dp)
+                    .background(
+                        colors.labelTertiary.copy(alpha = 0.5f + 0.5f * scale),
+                        RoundedCornerShape(DshRadius.full.dp),
+                    ),
             )
         }
-        Spacer(Modifier.width(6.dp))
-        Text(text = "正在生成", fontSize = 12.sp, color = colors.labelTertiary)
+        Spacer(Modifier.width(5.dp))
+        Text(text = "正在生成", fontSize = 11.sp, color = colors.labelTertiary)
     }
 }
 

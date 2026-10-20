@@ -127,7 +127,12 @@ fun Composer(
             Spacer(Modifier.size(6.dp))
 
             Row(
-                Modifier.fillMaxWidth(),
+                Modifier
+                    .fillMaxWidth()
+                    // Fixed height: the action row must keep its size when the IME
+                    // shrinks the window, otherwise the chips and the send button
+                    // get squashed instead of the text area yielding space.
+                    .height(30.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // The model chip takes whatever is left after the fixed-size send

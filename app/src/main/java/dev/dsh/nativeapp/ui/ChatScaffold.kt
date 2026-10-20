@@ -1,5 +1,6 @@
 package dev.dsh.nativeapp.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -68,9 +69,13 @@ fun ChatScaffold(
     onInfo: () -> Unit,
     onBranch: (Long) -> Unit,
     onPermissionClick: () -> Unit,
+    onAnswerQuestions: (String, Map<String, List<String>>) -> Unit,
 ) {
     val colors = LocalDshColors.current
     var drawerOpen by remember { mutableStateOf(false) }
+
+    // Back closes the drawer first; the Activity only exits when nothing is open.
+    BackHandler(enabled = drawerOpen) { drawerOpen = false }
 
     Box(Modifier.fillMaxSize().background(colors.bgBase)) {
         Column(Modifier.fillMaxSize()) {
@@ -95,6 +100,7 @@ fun ChatScaffold(
                 onDraftChange = onDraftChange,
                 onBranch = onBranch,
                 onPermissionClick = onPermissionClick,
+                onAnswerQuestions = onAnswerQuestions,
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
             )
         }

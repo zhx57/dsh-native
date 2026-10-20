@@ -16,6 +16,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import dev.dsh.nativeapp.data.PendingApproval
+import dev.dsh.nativeapp.data.PendingQuestion
+import dev.dsh.nativeapp.data.QuestionItem
+import dev.dsh.nativeapp.data.QuestionOption
 import dev.dsh.nativeapp.data.SlashCommand
 import dev.dsh.nativeapp.data.TodoItem
 import dev.dsh.nativeapp.data.TodoStatus
@@ -116,11 +119,15 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
 
     private suspend fun regroup() {
         val rows = _sessions.value.associateBy { it.sessionId }
+        // Recently used sessions first, both inside a workspace and across
+        // workspaces, so the list opens on what was actually last touched.
         val groups = workspaceIndex.values.map { workspace ->
             WorkspaceGroup(
                 workspaceId = workspace.workspaceId,
                 title = workspace.displayName,
-                sessions = workspace.sessionIds.mapNotNull { rows[it] },
+                sessions = workspace.sessionIds
+                    .mapNotNull { rows[it] }
+                    .sortedByDescending { it.updatedAt },
             )
         }.filter { it.sessions.isNotEmpty() }
             .sortedByDescending { group -> group.sessions.maxOfOrNull { it.updatedAt } ?: 0L }
@@ -136,12 +143,25 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
 
     // -------------------------------------------------------------- session
 
+    /** Session whose transcript is already in memory, to skip a redundant replay. */
+    private var loadedSessionId: String? = null
+
     fun openSession(sessionId: String) {
         if (_chat.value.sessionId == sessionId && activeStream != null) return
+
+        // Re-entering the session that is already loaded keeps its timeline until
+        // the fresh snapshot arrives, so the screen never flashes empty.
+        val keepTimeline = loadedSessionId == sessionId
+
         detach()
 
         activeBuilder = TimelineBuilder()
-        _chat.value = ChatUiState(sessionId = sessionId, connecting = true)
+        _chat.value = ChatUiState(
+            sessionId = sessionId,
+            connecting = true,
+            title = if (keepTimeline) _chat.value.title else "",
+            timeline = if (keepTimeline) _chat.value.timeline else emptyList(),
+        )
         loadCommands()
         val title = _sessions.value.firstOrNull { it.sessionId == sessionId }?.title.orEmpty()
 
@@ -149,6 +169,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
             sessionId = sessionId,
             onItem = { value ->
                 activeBuilder.applyFollowValue(value)
+                loadedSessionId = sessionId
                 val running = detectRunning(value)
                 val usage = detectUsage(value)
                 val projections = detectProjections(value)
@@ -263,6 +284,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         val stats: SessionStats?,
         val pressure: Long?,
         val window: Int?,
+        val questions: List<PendingQuestion>,
     )
 
     private fun detectExtras(value: JsonObject): Extras? {
@@ -300,7 +322,54 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
             stats = stats,
             pressure = num(pressureObj, "pressureTokens") ?: num(pressureObj, "projectedTokens"),
             window = num(pressureObj, "contextWindow")?.toInt(),
+            questions = parseQuestions(values["userQuestions"] as? JsonObject),
         )
+    }
+
+    /**
+     * Read the `userQuestions` projection.
+     *
+     * `ask_user_question` batches never arrive as stream events; the host keeps
+     * them in this projection, which is why the tool previously looked like a
+     * no-op in the app.
+     */
+    private fun parseQuestions(container: JsonObject?): List<PendingQuestion> {
+        val active = container?.get("active") as? kotlinx.serialization.json.JsonArray ?: return emptyList()
+        return active.mapNotNull { element ->
+            val batch = element as? JsonObject ?: return@mapNotNull null
+            val callId = dev.dsh.nativeapp.data.JsonText.string(batch["callId"]) ?: return@mapNotNull null
+            val questions = (batch["questions"] as? kotlinx.serialization.json.JsonArray).orEmpty()
+                .mapNotNull { raw ->
+                    val q = raw as? JsonObject ?: return@mapNotNull null
+                    val id = dev.dsh.nativeapp.data.JsonText.string(q["id"]) ?: return@mapNotNull null
+                    QuestionItem(
+                        id = id,
+                        question = dev.dsh.nativeapp.data.JsonText.string(q["question"]) ?: return@mapNotNull null,
+                        detail = dev.dsh.nativeapp.data.JsonText.string(q["detail"]),
+                        header = dev.dsh.nativeapp.data.JsonText.string(q["header"]),
+                        options = (q["options"] as? kotlinx.serialization.json.JsonArray).orEmpty()
+                            .mapNotNull { opt ->
+                                val o = opt as? JsonObject ?: return@mapNotNull null
+                                val label = dev.dsh.nativeapp.data.JsonText.string(o["label"]) ?: return@mapNotNull null
+                                QuestionOption(label, dev.dsh.nativeapp.data.JsonText.string(o["description"]))
+                            },
+                        multiSelect = dev.dsh.nativeapp.data.JsonText.bool(q["multiSelect"]) ?: false,
+                    )
+                }
+            if (questions.isEmpty()) null else PendingQuestion(callId, questions)
+        }
+    }
+
+    /** Submit answers for one `ask_user_question` batch. */
+    fun answerQuestions(callId: String, answers: Map<String, List<String>>) {
+        val sessionId = _chat.value.sessionId ?: return
+        _chat.value = _chat.value.copy(questions = _chat.value.questions.filterNot { it.callId == callId })
+        viewModelScope.launch {
+            runCatching { repo.answerQuestions(sessionId, callId, answers) }
+                .onFailure { error ->
+                    _chat.value = _chat.value.copy(error = describe(error, "提交回答失败"))
+                }
+        }
     }
 
     private fun TodoItemOf(content: String, status: TodoStatus): TodoItem = TodoItem(content, status)

@@ -2,6 +2,7 @@ package dev.dsh.nativeapp
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
@@ -99,6 +100,13 @@ private fun DshRoot(
     var draft by remember { mutableStateOf("") }
     val permissions by vm.permissions.collectAsState()
 
+    // Settings is a screen, not a destination the Activity should exit from:
+    // back has to return to the transcript.
+    BackHandler(enabled = showSettings) { showSettings = false }
+    BackHandler(enabled = showInfo) { showInfo = false }
+    BackHandler(enabled = showPermission) { showPermission = false }
+    BackHandler(enabled = showModelPicker) { showModelPicker = false }
+
     if (showSettings) {
         SettingsScreen(
             host = host,
@@ -148,6 +156,7 @@ private fun DshRoot(
         onInfo = { showInfo = true },
         onBranch = { seq -> vm.branchFrom(seq) },
         onPermissionClick = { showPermission = true },
+        onAnswerQuestions = { callId, answers -> vm.answerQuestions(callId, answers) },
     )
 
     if (showPermission) {

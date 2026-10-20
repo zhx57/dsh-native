@@ -233,6 +233,44 @@ class DshRepository(private val client: DshClient) {
 
 
     /**
+     * Answer one `ask_user_question` batch.
+     *
+     * @param answers question id to the selected option labels.
+     */
+    suspend fun answerQuestions(
+        agentId: String,
+        callId: String,
+        answers: Map<String, List<String>>,
+    ) = withContext(Dispatchers.IO) {
+        client.call(
+            "userQuestions/answer",
+            buildJsonObject {
+                put("agentId", agentId)
+                put("callId", callId)
+                put(
+                    "answer",
+                    buildJsonObject {
+                        put(
+                            "answers",
+                            buildJsonArray {
+                                answers.forEach { (id, selected) ->
+                                    add(
+                                        buildJsonObject {
+                                            put("id", id)
+                                            put("selected", buildJsonArray { selected.forEach { add(JsonPrimitive(it)) } })
+                                        },
+                                    )
+                                }
+                            },
+                        )
+                    },
+                )
+            },
+        )
+        Unit
+    }
+
+    /**
      * Answer a pending approval.
      *
      * `allowed-once` / `rejected` are the outcomes the web approval panel sends;

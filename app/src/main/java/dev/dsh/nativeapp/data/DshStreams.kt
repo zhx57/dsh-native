@@ -40,6 +40,9 @@ class DshStreams(private val client: DshClient) {
     /**
      * Follow one session: history page first, then live events and assistant frames.
      *
+     * @param maxMessages how much history the host replays. A phone screen shows a
+     *   handful of turns, so requesting the whole log only delays first paint; the
+     *   tail is enough and older context is not needed to resume.
      * @param onItem receives each stream item value verbatim, so the caller owns
      *   folding and can reuse the same reducer as `session/page`.
      */
@@ -48,6 +51,7 @@ class DshStreams(private val client: DshClient) {
         onItem: (JsonObject) -> Unit,
         onError: (Throwable) -> Unit = {},
         onClosed: () -> Unit = {},
+        maxMessages: Int = 24,
     ): DshStream = client.stream(
         endpoint = "session/follow",
         args = buildJsonObject {
@@ -57,7 +61,7 @@ class DshStreams(private val client: DshClient) {
                     put("sessionId", sessionId)
                 })
                 put("assistantStream", true)
-                put("maxMessages", 80)
+                put("maxMessages", maxMessages)
             })
         },
         onItem = { value -> onItem(value.jsonObject) },

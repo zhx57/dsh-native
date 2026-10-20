@@ -21,7 +21,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -50,22 +55,34 @@ fun ChatScreen(
     onDraftChange: (String) -> Unit,
     onBranch: (Long) -> Unit,
     onPermissionClick: () -> Unit,
+    onAnswerQuestions: (String, Map<String, List<String>>) -> Unit,
     contentPadding: PaddingValues,
 ) {
     val colors = LocalDshColors.current
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
     val itemCount = state.timeline.size
-    val atBottom by remember {
-        derivedStateOf {
-            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            last >= itemCount - 2
-        }
+
+    // "Following" means the tail was last in view. It is tracked as explicit state
+    // rather than recomputed from layout, because a streaming append changes the
+    // item count and would otherwise be read as "still at the bottom" even while
+    // the operator has scrolled up to select text.
+    var followTail by remember { mutableStateOf(true) }
+
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.layoutInfo }
+            .collect { info ->
+                val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: return@collect
+                val total = info.totalItemsCount
+                if (total > 0) followTail = lastVisible >= total - 2
+            }
     }
 
-    // Follow the tail while streaming, but never fight a user scrolling back.
-    LaunchedEffect(itemCount, state.running) {
-        if (itemCount > 0 && (atBottom || state.running)) {
+    // Only follow when the operator has not scrolled away, so watching the tail
+    // never yanks the viewport out from under a text selection.
+    LaunchedEffect(itemCount) {
+        if (itemCount > 0 && followTail) {
             listState.animateScrollToItem(itemCount - 1)
         }
     }
@@ -108,6 +125,34 @@ fun ChatScreen(
                 }
             }
 
+            TranscriptNavigator(
+                canScrollUp = state.timeline.isNotEmpty(),
+                canScrollDown = !followTail,
+                onPrevious = {
+                    scope.launch {
+                        val target = previousMessageIndex(listState, state.timeline)
+                        if (target >= 0) listState.animateScrollToItem(target)
+                    }
+                },
+                onNext = {
+                    scope.launch {
+                        val target = nextMessageIndex(listState, state.timeline)
+                        if (target >= 0) listState.animateScrollToItem(target)
+                    }
+                },
+                onJumpToLatest = {
+                    scope.launch {
+                        followTail = true
+                        if (state.timeline.isNotEmpty()) {
+                            listState.animateScrollToItem(state.timeline.lastIndex)
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 2.dp),
+            )
+
             if (state.connecting) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(text = "正在加载会话…", fontSize = 13.sp, color = colors.labelTertiary)
@@ -135,6 +180,19 @@ fun ChatScreen(
                     modifier = Modifier
                         .clickable(onClick = onDismissError)
                         .padding(start = 10.dp, top = 2.dp, bottom = 2.dp),
+                )
+            }
+        }
+
+        if (state.questions.isNotEmpty()) {
+            state.questions.forEach { batch ->
+                QuestionCard(
+                    batch = batch,
+                    onSubmit = { answers -> onAnswerQuestions(batch.callId, answers) },
+                    modifier = Modifier.padding(
+                        horizontal = DshSpacing.md.dp,
+                        vertical = DshSpacing.xs.dp,
+                    ),
                 )
             }
         }
@@ -251,4 +309,24 @@ private fun keyOf(item: TimelineItem): String = when (item) {
     is TimelineItem.ToolCallItem -> "t-${item.callId}"
     is TimelineItem.TurnDivider -> "d-${item.turn}"
     is TimelineItem.Notice -> "n-${item.seq}"
+}
+
+/** Index of the message above the current viewport, or -1 at the top. */
+private fun previousMessageIndex(
+    listState: LazyListState,
+    timeline: List<TimelineItem>,
+): Int {
+    val first = listState.firstVisibleItemIndex
+    return (first - 1).coerceAtLeast(0).takeIf { first > 0 && timeline.isNotEmpty() } ?: -1
+}
+
+/** Index of the message below the viewport, or -1 when already at the tail. */
+private fun nextMessageIndex(
+    listState: LazyListState,
+    timeline: List<TimelineItem>,
+): Int {
+    if (timeline.isEmpty()) return -1
+    val visible = listState.layoutInfo.visibleItemsInfo
+    val last = visible.lastOrNull()?.index ?: return -1
+    return (last + 1).takeIf { it <= timeline.lastIndex } ?: -1
 }
