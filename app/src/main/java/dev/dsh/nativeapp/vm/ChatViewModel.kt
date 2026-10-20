@@ -248,12 +248,21 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
     /** True when the host reported more history above what is loaded. */
     val hasMoreHistory: StateFlow<Boolean> = _hasMoreHistory.asStateFlow()
 
+    private val _loadingOlder = MutableStateFlow(false)
+
+    /** True while a previous page is being fetched, for the top-of-list spinner. */
+    val loadingOlder: StateFlow<Boolean> = _loadingOlder.asStateFlow()
+
     /**
      * Fetch the previous page of history and prepend it.
      *
      * The follow stream only replays the newest window (`maxMessages`), so scrolling
      * past it showed nothing even though the session continues. `session/page`
      * accepts `beforeSeq` to walk backwards, and answers `hasMore` for the next step.
+     *
+     * `throughSeq` must be the session's real cursor: the host rejects anything past
+     * it with `session page through seq ... is past cursor ...`, which silently made
+     * every earlier attempt at paging fail.
      */
     fun loadOlderHistory() {
         val sessionId = _chat.value.sessionId ?: return
@@ -264,22 +273,33 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
             return
         }
         loadingHistory = true
+        _loadingOlder.value = true
         viewModelScope.launch {
             try {
+                val head = repo.listSessions().firstOrNull { it.sessionId == sessionId }
+                    ?: run {
+                        _hasMoreHistory.value = false
+                        return@launch
+                    }
                 val page = repo.loadPage(
                     sessionId = sessionId,
-                    throughSeq = Long.MAX_VALUE,
+                    throughSeq = head.projections?.asOfSeq ?: 0L,
                     maxMessages = 24,
                     beforeSeq = cursor,
                 )
-                activeBuilder.prependPage(page.records)
-                _hasMoreHistory.value = page.hasMore
-                _chat.value = _chat.value.copy(timeline = activeBuilder.snapshot())
+                if (page.records.isEmpty()) {
+                    _hasMoreHistory.value = false
+                } else {
+                    activeBuilder.prependPage(page.records)
+                    _hasMoreHistory.value = page.hasMore
+                    _chat.value = _chat.value.copy(timeline = activeBuilder.snapshot())
+                }
             } catch (error: Throwable) {
                 if (error is kotlinx.coroutines.CancellationException) throw error
                 _chat.value = _chat.value.copy(error = describe(error, "加载更早的消息失败"))
             } finally {
                 loadingHistory = false
+                _loadingOlder.value = false
             }
         }
     }

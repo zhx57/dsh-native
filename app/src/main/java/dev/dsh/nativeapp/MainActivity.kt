@@ -108,6 +108,8 @@ private fun DshRoot(
     var draft by remember { mutableStateOf("") }
     val permissions by vm.permissions.collectAsState()
     val attachments by vm.attachments.collectAsState()
+    val loadingOlder by vm.loadingOlder.collectAsState()
+    val hasMoreHistory by vm.hasMoreHistory.collectAsState()
 
     // The launcher callback is not an Activity member scope, so the context is
     // captured once as a local value.
@@ -186,6 +188,8 @@ private fun DshRoot(
         onSteerQueued = { vm.steerQueued(it) },
         onEditQueued = { id, text -> vm.editQueued(id, text) },
         onRemoveQueued = { vm.removeQueued(it) },
+        loadingOlder = loadingOlder,
+        hasMoreHistory = hasMoreHistory,
         onPlusClick = { showPlusMenu = true },
         attachmentNames = attachments.map { it.first },
         onRemoveAttachment = { vm.removeAttachment(it) },

@@ -74,6 +74,8 @@ fun ChatScreen(
     onSteerQueued: (String) -> Unit,
     onEditQueued: (String, String) -> Unit,
     onRemoveQueued: (String) -> Unit,
+    loadingOlder: Boolean,
+    hasMoreHistory: Boolean,
     onPlusClick: () -> Unit,
     attachmentNames: List<String>,
     onRemoveAttachment: (Int) -> Unit,
@@ -145,11 +147,15 @@ fun ChatScreen(
     }
 
     // Load earlier history when the operator reaches the top. The follow stream only
-    // replays the newest window, so without this the transcript simply ended.
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.firstVisibleItemIndex }
-            .collect { first ->
-                if (first <= 1) onLoadOlder()
+    // replays the newest window, so without this the transcript simply ended. Index 0
+    // is the leading indicator row, so the real first message sits at index 1.
+    LaunchedEffect(listState, hasMoreHistory) {
+        snapshotFlow {
+            val info = listState.layoutInfo
+            info.firstVisibleItemIndex to info.firstVisibleItemScrollOffset
+        }
+            .collect { (first, offset) ->
+                if (first <= 1 && offset < 64) onLoadOlder()
             }
     }
 
@@ -185,6 +191,15 @@ fun ChatScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
+                // Chrome-style leading indicator: a spinner while the previous page
+                // is loading, and a terminal notice once the log start is reached.
+                item(key = "history-head") {
+                    HistoryHead(
+                        loading = loadingOlder,
+                        hasMore = hasMoreHistory,
+                        isEmpty = state.timeline.isEmpty(),
+                    )
+                }
                 items(items = state.timeline, key = { keyOf(it) }) { item ->
                     when (item) {
                         is TimelineItem.UserMessage -> UserTurn(item)
@@ -403,8 +418,7 @@ private fun NoSessionState() {
 }
 
 /** Stable identity so streaming updates reuse rows instead of rebuilding them. */
-private fun keyOf(item: TimelineItem): String = when (item) {
-    is TimelineItem.UserMessage -> "u-${item.seq}"
+private fun keyOf(item: TimelineItem): String = when (item) {    is TimelineItem.UserMessage -> "u-${item.seq}"
     is TimelineItem.AssistantMessage -> "a-${item.seq}"
     is TimelineItem.ToolCallItem -> "t-${item.callId}"
     is TimelineItem.TurnDivider -> "d-${item.turn}"
@@ -509,3 +523,39 @@ private fun CommandRow(item: TimelineItem.CommandItem) {
 }
 
 /** Index of the message above the current viewport, or -1 at the top. */
+
+/**
+ * Leading row of the transcript.
+ *
+ * Shows a small spinner while the previous page loads — the same affordance a
+ * browser gives when reaching the top of a long page — and a quiet notice once the
+ * host reports no earlier events, so the operator knows the list is genuinely at
+ * its start rather than merely stuck.
+ */
+@Composable
+private fun HistoryHead(loading: Boolean, hasMore: Boolean, isEmpty: Boolean) {
+    val colors = LocalDshColors.current
+    if (isEmpty) {
+        Spacer(Modifier.height(1.dp))
+        return
+    }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(26.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            loading -> androidx.compose.material3.CircularProgressIndicator(
+                modifier = Modifier.size(15.dp),
+                strokeWidth = 1.5.dp,
+                color = colors.labelTertiary,
+            )
+            !hasMore -> Text(
+                text = "已经是最早的消息",
+                fontSize = 11.sp,
+                color = colors.labelCaption,
+            )
+        }
+    }
+}
