@@ -64,7 +64,9 @@ private fun DshRoot(
                 pairingError = null
                 pairingBusy = true
                 scope.launch {
-                    val result = app.hostStore.pair(input)
+                    val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        app.hostStore.pair(input)
+                    }
                     pairingBusy = false
                     when (result) {
                         is dev.dsh.nativeapp.data.PairResult.Success -> {

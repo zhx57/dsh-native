@@ -6,18 +6,14 @@ import dev.dsh.nativeapp.DshApplication
 import dev.dsh.nativeapp.data.ChatUiState
 import dev.dsh.nativeapp.data.DshStream
 import dev.dsh.nativeapp.data.ModelCatalog
-import dev.dsh.nativeapp.data.ModelGroup
 import dev.dsh.nativeapp.data.SessionRow
-import dev.dsh.nativeapp.data.SessionSummary
 import dev.dsh.nativeapp.data.TimelineBuilder
 import dev.dsh.nativeapp.data.WorkspaceGroup
-import dev.dsh.nativeapp.data.WorkspaceSummary
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import dev.dsh.nativeapp.data.WorkspaceSummary
 import kotlinx.serialization.json.JsonObject
 
 /** Owns the session index, the active session stream, and the composer state. */
@@ -53,7 +49,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
 
     fun refreshIndex() {
         viewModelScope.launch {
-            runCatching { withContext(Dispatchers.IO) { repo.listSessions() } }
+            runCatching { repo.listSessions() }
                 .onSuccess { summaries ->
                     _sessions.value = summaries
                         .filter { it.parentSessionId == null }
@@ -97,7 +93,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
 
     fun refreshCatalog() {
         viewModelScope.launch {
-            runCatching { withContext(Dispatchers.IO) { repo.modelCatalog() } }
+            runCatching { repo.modelCatalog() }
                 .onSuccess { _catalog.value = it }
         }
     }
@@ -156,7 +152,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
 
     fun newSession(workspaceId: String? = null) {
         viewModelScope.launch {
-            runCatching { withContext(Dispatchers.IO) { repo.createSession(workspaceId) } }
+            runCatching { repo.createSession(workspaceId) }
                 .onSuccess { id ->
                     refreshIndex()
                     openSession(id)
@@ -173,7 +169,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         if (trimmed.isEmpty()) return
         val mode = if (_chat.value.running) "steer" else "queue"
         viewModelScope.launch {
-            runCatching { withContext(Dispatchers.IO) { repo.sendPrompt(sessionId, trimmed, mode) } }
+            runCatching { repo.sendPrompt(sessionId, trimmed, mode) }
                 .onFailure { error ->
                     _chat.value = _chat.value.copy(error = error.message ?: "发送失败")
                 }
@@ -183,7 +179,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
     fun stop() {
         val sessionId = _chat.value.sessionId ?: return
         viewModelScope.launch {
-            runCatching { withContext(Dispatchers.IO) { repo.cancelSession(sessionId) } }
+            runCatching { repo.cancelSession(sessionId) }
                 .onFailure { error ->
                     _chat.value = _chat.value.copy(error = error.message ?: "取消失败")
                 }

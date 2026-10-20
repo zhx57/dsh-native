@@ -34,6 +34,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import dev.dsh.nativeapp.data.TimelineItem
 import dev.dsh.nativeapp.ui.markdown.MarkdownText
 import dev.dsh.nativeapp.ui.theme.DshRadius
@@ -214,14 +218,12 @@ private fun SectionLabel(text: String) {
 private fun summarizeArguments(name: String, arguments: String): String {
     if (arguments.isBlank()) return ""
     val parsed = runCatching {
-        kotlinx.serialization.json.Json.parseToJsonElement(arguments)
-            .let { it as? kotlinx.serialization.json.JsonObject }
+        Json.parseToJsonElement(arguments) as? JsonObject
     }.getOrNull()
     val preferred = listOf("description", "command", "path", "file_path", "pattern", "query", "url")
     if (parsed != null) {
         for (key in preferred) {
-            val value = parsed[key] as? kotlinx.serialization.json.JsonPrimitive
-            val text = value?.contentOrNull
+            val text = (parsed[key] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content
             if (!text.isNullOrBlank()) return text.replace('\n', ' ').take(120)
         }
     }
