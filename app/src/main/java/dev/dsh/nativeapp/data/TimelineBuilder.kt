@@ -133,14 +133,44 @@ class TimelineBuilder {
         val blocks = EventParser.blocks(message["content"])
         if (blocks.isEmpty()) return
         finalizeStreaming()
-        items.add(TimelineItem.AssistantMessage(seq, time, blocks))
+
+        // A committed assistant message mixes prose and tool calls. Emit the prose
+        // once and let each tool-call block become its own row, otherwise the same
+        // sentences appear both as a bubble and again beneath the tool card.
+        val prose = blocks.filter { it !is ContentBlock.ToolCall }
+        if (prose.isNotEmpty()) {
+            items.add(TimelineItem.AssistantMessage(seq, time, prose))
+        }
+        blocks.filterIsInstance<ContentBlock.ToolCall>().forEach { call ->
+            if (toolIndex.containsKey(call.id)) return@forEach
+            toolIndex[call.id] = items.size
+            items.add(
+                TimelineItem.ToolCallItem(
+                    seq = seq,
+                    time = time,
+                    callId = call.id,
+                    name = call.name,
+                    arguments = call.arguments,
+                ),
+            )
+        }
     }
 
     private fun applyToolCall(seq: Long, time: Long, data: JsonObject) {
         val callId = JsonText.string(data["callId"]) ?: return
         val name = JsonText.string(data["name"]) ?: "tool"
         val args = JsonText.string(data["arguments"]) ?: ""
-        if (toolIndex.containsKey(callId)) return
+        // The same call arrives twice: once inside the assistant message's content
+        // and once as a standalone tool/call event. Keep whichever lands first and
+        // only backfill arguments the other one lacked.
+        val existing = toolIndex[callId]?.let { items.getOrNull(it) as? TimelineItem.ToolCallItem }
+        if (existing != null) {
+            if (existing.arguments.isBlank() && args.isNotBlank()) {
+                val index = toolIndex.getValue(callId)
+                items[index] = existing.copy(arguments = args)
+            }
+            return
+        }
         toolIndex[callId] = items.size
         items.add(TimelineItem.ToolCallItem(seq, time, callId, name, args))
     }

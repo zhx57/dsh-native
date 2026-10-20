@@ -84,10 +84,16 @@ private fun DshRoot(
         return
     }
 
+    // Resolve the ViewModel before any early return. Composing it conditionally
+    // destroys and recreates it on every settings visit, which replays the whole
+    // session from the host — the reason entering settings looked like a reload.
     val vm: ChatViewModel = viewModel(factory = ChatViewModel.factory(app))
     val chat by vm.chat.collectAsState()
     val groups by vm.workspaces.collectAsState()
     val catalog by vm.catalog.collectAsState()
+
+    var showModelPicker by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf("") }
 
     if (showSettings) {
         SettingsScreen(
@@ -111,9 +117,6 @@ private fun DshRoot(
             ?.models?.firstOrNull { it.id == ref.model }?.name
             ?: ref.model
     }
-
-    var showModelPicker by remember { mutableStateOf(false) }
-    var draft by remember { mutableStateOf("") }
 
     ChatScaffold(
         state = chat,

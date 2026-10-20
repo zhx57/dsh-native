@@ -109,9 +109,19 @@ fun ReasoningBlock(text: String, streaming: Boolean) {
 fun ToolCallCard(item: TimelineItem.ToolCallItem) {
     val colors = LocalDshColors.current
     var expanded by remember { mutableStateOf(false) }
-    val summary = remember(item.arguments) { summarizeArguments(item.name, item.arguments) }
+    val digest = remember(item.arguments) { digestArguments(item.name, item.arguments) }
     val output = remember(item.result) { classifyToolOutput(item.result) }
     val resultPreview = remember(output) { previewOf(output) }
+
+    // Title preference: the model's own explanation, then the concrete target,
+    // then the tool's friendly name. This is what the web transcript shows.
+    val title = digest.headline.ifBlank { displayName(item.name) }
+    val subtitle = when {
+        digest.headline.isNotBlank() && digest.detail.isNotBlank() -> digest.detail
+        digest.headline.isBlank() && digest.detail.isNotBlank() -> digest.detail
+        else -> resultPreview
+    }
+    val subtitleIsCommand = digest.detail.isNotBlank() && subtitle == digest.detail
 
     Column(
         Modifier
@@ -140,25 +150,27 @@ fun ToolCallCard(item: TimelineItem.ToolCallItem) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = displayName(item.name),
+                        text = title,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
                         color = colors.labelPrimary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
                     )
                     if (output is ToolOutput.Diff && (output.added + output.removed) > 0) {
                         Spacer(Modifier.width(6.dp))
                         DiffStat(output.added, output.removed)
                     }
                 }
-                val subtitle = summary.ifBlank { resultPreview }
                 if (subtitle.isNotBlank() && !expanded) {
                     Text(
                         text = subtitle,
-                        fontSize = 12.sp,
-                        color = colors.labelTertiary,
+                        fontSize = 11.5.sp,
+                        color = if (subtitleIsCommand) colors.labelTertiary else colors.labelCaption,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        fontFamily = if (summary.isBlank()) FontFamily.Default else FontFamily.Monospace,
+                        fontFamily = if (subtitleIsCommand) FontFamily.Monospace else FontFamily.Default,
                     )
                 }
             }
@@ -262,18 +274,47 @@ private fun iconFor(name: String): androidx.compose.ui.graphics.vector.ImageVect
     else -> Icons.Outlined.Terminal
 }
 
-/** One-line argument digest shown while the card is collapsed. */
-private fun summarizeArguments(name: String, arguments: String): String {
-    if (arguments.isBlank()) return ""
-    val parsed = runCatching {
-        Json.parseToJsonElement(arguments) as? JsonObject
-    }.getOrNull()
-    val preferred = listOf("description", "command", "path", "file_path", "pattern", "query", "url")
-    if (parsed != null) {
-        for (key in preferred) {
-            val text = (parsed[key] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content
-            if (!text.isNullOrBlank()) return text.replace('\n', ' ').take(120)
+/**
+ * Split a tool call's arguments into the human explanation and the concrete
+ * target.
+ *
+ * `pwsh` calls carry both: `description` is the model's own sentence about what
+ * the command does, while `command` is the thing being run. Showing only the
+ * command loses the intent; showing them on one line conflates two different
+ * kinds of information, so the card renders the explanation as its title and the
+ * command as a monospace subtitle.
+ */
+internal data class ArgumentDigest(val headline: String, val detail: String)
+
+internal fun digestArguments(name: String, arguments: String): ArgumentDigest {
+    if (arguments.isBlank()) return ArgumentDigest("", "")
+
+    val parsed = runCatching { Json.parseToJsonElement(arguments) as? JsonObject }.getOrNull()
+        ?: return ArgumentDigest("", arguments.replace('\n', ' ').take(160))
+
+    fun value(key: String): String? =
+        (parsed[key] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content?.takeIf { it.isNotBlank() }
+
+    val explanation = value("description") ?: value("explanation")
+    val target = value("command")
+        ?: value("file_path")
+        ?: value("path")
+        ?: value("pattern")
+        ?: value("query")
+        ?: value("url")
+        ?: value("prompt")
+
+    return when {
+        explanation != null && target != null -> ArgumentDigest(explanation, target)
+        explanation != null -> ArgumentDigest(explanation, "")
+        target != null -> ArgumentDigest("", target)
+        else -> {
+            // No recognized field: fall back to the first short scalar so the row
+            // still says something specific instead of nothing.
+            val firstScalar = parsed.entries
+                .mapNotNull { (_, element) -> (element as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content }
+                .firstOrNull { it.isNotBlank() && it.length <= 120 }
+            ArgumentDigest("", firstScalar ?: "")
         }
     }
-    return arguments.replace('\n', ' ').take(120)
 }
