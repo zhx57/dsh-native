@@ -103,9 +103,15 @@ class HostStore(context: Context) {
             ?.split('&')
             ?.firstOrNull { it.startsWith("token=") }
             ?.removePrefix("token=")
+            ?.takeIf { it.isNotBlank() }
 
-        if (token.isNullOrBlank()) {
-            return PairResult.Failure("链接缺少 token 参数，请复制 dsh web 打印的完整地址")
+        if (token == null) {
+            // A bare origin cannot mint a session: the launch token is the only
+            // exchange credential, so ask for the printed URL instead of failing
+            // with an opaque 401.
+            return PairResult.Failure(
+                "地址里没有 token。请复制 dsh web 启动时打印的完整链接（形如 http://主机:3080/?token=…）",
+            )
         }
 
         val request = Request.Builder()
@@ -119,9 +125,12 @@ class HostStore(context: Context) {
                 val setCookies = response.headers.values("set-cookie")
                     .filter { it.startsWith("dsh-auth-") }
                 if (setCookies.isEmpty()) {
-                    return@use PairResult.Failure(
-                        "配对失败：服务器未下发会话凭据（HTTP ${response.code}）。请重新生成配对链接。",
-                    )
+                    val detail = when (response.code) {
+                        401 -> "配对密钥无效或已过期，请在电脑上重新生成链接"
+                        403 -> "主机拒绝了这个地址（Host 校验失败），确认填的是电脑实际监听地址"
+                        else -> "服务器未下发会话凭据（HTTP ${response.code}）"
+                    }
+                    return@use PairResult.Failure("配对失败：$detail")
                 }
                 val cookie = setCookies.joinToString("; ") { it.substringBefore(';') }
                 val paired = PairedHost(
