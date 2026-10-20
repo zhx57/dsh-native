@@ -114,7 +114,13 @@ class DshRepository(private val client: DshClient) {
 
     // ------------------------------------------------------------------ page
 
-    /** Load one page of a session's event log. */
+    /**
+     * Load one page of a session's event log.
+     *
+     * `throughSeq` must not exceed the session's own cursor, so callers either
+     * pass the `asOfSeq` reported by `session/list` or [loadTail], which reads
+     * the cursor first.
+     */
     suspend fun loadPage(sessionId: String, throughSeq: Long, maxMessages: Int = 60): PageResult =
         withContext(Dispatchers.IO) {
             val value = client.call(
@@ -130,14 +136,28 @@ class DshRepository(private val client: DshClient) {
                     })
                 },
             )
-            val obj = value.jsonObject
-            PageResult(
-                records = (obj["records"] as? JsonArray ?: JsonArray(emptyList()))
-                    .mapNotNull { it as? JsonObject },
-                cursor = JsonText.long(obj["cursor"]) ?: 0L,
-                hasMore = JsonText.bool(obj["hasMore"]) ?: false,
-            )
+            parsePage(value)
         }
+
+    /** Load the newest page by resolving the session cursor first. */
+    suspend fun loadTail(sessionId: String, maxMessages: Int = 60): PageResult =
+        withContext(Dispatchers.IO) {
+            val cursor = listSessions()
+                .firstOrNull { it.sessionId == sessionId }
+                ?.projections?.asOfSeq
+                ?: 0L
+            loadPage(sessionId, cursor, maxMessages)
+        }
+
+    private fun parsePage(value: JsonElement): PageResult {
+        val obj = value.jsonObject
+        return PageResult(
+            records = (obj["records"] as? JsonArray ?: JsonArray(emptyList()))
+                .mapNotNull { it as? JsonObject },
+            cursor = JsonText.long(obj["cursor"]) ?: 0L,
+            hasMore = JsonText.bool(obj["hasMore"]) ?: false,
+        )
+    }
 
     data class PageResult(
         val records: List<JsonObject>,
