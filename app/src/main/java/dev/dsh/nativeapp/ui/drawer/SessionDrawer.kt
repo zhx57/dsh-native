@@ -20,12 +20,17 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -46,6 +51,8 @@ fun SessionDrawer(
     onSelect: (String) -> Unit,
     onNewSession: () -> Unit,
     onSettings: () -> Unit,
+    onTogglePin: (SessionRow) -> Unit = {},
+    onToggleArchive: (SessionRow) -> Unit = {},
 ) {
     val colors = LocalDshColors.current
 
@@ -108,6 +115,8 @@ fun SessionDrawer(
                         row = session,
                         active = session.sessionId == activeSessionId,
                         onClick = { onSelect(session.sessionId) },
+                        onTogglePin = { onTogglePin(session) },
+                        onToggleArchive = { onToggleArchive(session) },
                     )
                 }
             }
@@ -147,9 +156,15 @@ private fun SessionRowItem(
     row: SessionRow,
     active: Boolean,
     onClick: () -> Unit,
+    onTogglePin: () -> Unit = {},
+    onToggleArchive: () -> Unit = {},
 ) {
     val colors = LocalDshColors.current
-    Row(
+    // Actions expand inline under the row instead of opening a dialog: the drawer is
+    // 300dp wide and a modal on top of it hid the list the operator was choosing from.
+    var actionsOpen by remember { mutableStateOf(false) }
+
+    Column(
         Modifier
             .fillMaxWidth()
             .background(
@@ -158,36 +173,92 @@ private fun SessionRowItem(
                     else -> androidx.compose.ui.graphics.Color.Transparent
                 },
                 RoundedCornerShape(DshRadius.md.dp),
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            ),
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = row.title,
-                fontSize = 13.5.sp,
-                fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
-                color = if (active) colors.labelPrimary else colors.labelSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (row.subtitle.isNotBlank()) {
-                Text(
-                    text = row.subtitle,
-                    fontSize = 11.sp,
-                    color = colors.labelCaption,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (row.pinned) {
+                        Icon(
+                            imageVector = Icons.Filled.PushPin,
+                            contentDescription = "已置顶",
+                            tint = colors.labelTertiary,
+                            modifier = Modifier
+                                .size(11.dp)
+                                .padding(end = 3.dp),
+                        )
+                    }
+                    Text(
+                        text = row.title,
+                        fontSize = 13.5.sp,
+                        fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
+                        color = if (active) colors.labelPrimary else colors.labelSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (row.subtitle.isNotBlank()) {
+                    Text(
+                        text = row.subtitle,
+                        fontSize = 11.sp,
+                        color = colors.labelCaption,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (row.running) {
+                Box(
+                    Modifier
+                        .size(6.dp)
+                        .background(colors.stateSuccess, RoundedCornerShape(DshRadius.full.dp)),
                 )
             }
-        }
-        if (row.running) {
-            Box(
-                Modifier
-                    .size(6.dp)
-                    .background(colors.stateSuccess, RoundedCornerShape(DshRadius.full.dp)),
+            Text(
+                text = "⋯",
+                fontSize = 14.sp,
+                color = colors.labelCaption,
+                modifier = Modifier
+                    .clickable { actionsOpen = !actionsOpen }
+                    .padding(start = 8.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
             )
         }
+
+        if (actionsOpen) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 10.dp, end = 10.dp, bottom = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(DshSpacing.md.dp),
+            ) {
+                RowAction(if (row.pinned) "取消置顶" else "置顶") {
+                    actionsOpen = false
+                    onTogglePin()
+                }
+                RowAction("归档", danger = true) {
+                    actionsOpen = false
+                    onToggleArchive()
+                }
+            }
+        }
     }
+}
+
+@Composable
+private fun RowAction(label: String, danger: Boolean = false, onClick: () -> Unit) {
+    val colors = LocalDshColors.current
+    Text(
+        text = label,
+        fontSize = 11.5.sp,
+        color = if (danger) colors.stateError else colors.buttonInfoFill,
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .padding(vertical = 2.dp),
+    )
 }

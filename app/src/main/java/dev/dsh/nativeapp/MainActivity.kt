@@ -161,10 +161,29 @@ private fun DshRoot(
     // Watches are ~200dp wide: the chip keeps only the bare model id and the
     // effort as a short suffix, because "workbuddy/deepseek-v4.1-flash · 高"
     // alone overflows the composer row.
+    //
+    // A model that the host no longer offers is marked rather than silently shown:
+    // the session projection keeps naming it after its config entry is deleted, and
+    // presenting it as normal hid the fact that the next turn would fail.
+    //
+    // `catalog` comes from a delegated property, which cannot be smart-cast, so it is
+    // read into a local first.
+    val catalogNow = catalog
+    val modelGone = catalogNow != null && catalogNow.loaded &&
+        activeModel != null && !catalogNow.has(activeProvider, activeModel)
     val shortModel = activeModel?.substringAfterLast('/') ?: activeModel
     val shortEffort = activeEffort?.takeIf { it.isNotBlank() && it != "off" }
         ?.let { dev.dsh.nativeapp.ui.chat.effortShort(it) }
-    val modelLabel = listOfNotNull(shortModel, shortEffort).joinToString(" ")
+    val modelLabel = listOfNotNull(shortModel, shortEffort).joinToString(" ") +
+        if (modelGone) "（已失效）" else ""
+
+    // Opening the picker re-reads the catalog first. The host can gain or lose
+    // providers whenever its LLM config changes, and a stale list meant a model the
+    // operator had just removed was still offered while a new one was missing.
+    val openModelPicker: () -> Unit = {
+        vm.refreshCatalog()
+        showModelPicker = true
+    }
 
     ChatScaffold(
         state = chat,
@@ -173,9 +192,14 @@ private fun DshRoot(
         onSelectSession = { vm.openSession(it) },
         onNewSession = { vm.newSession() },
         onOpenSettings = { showSettings = true },
+        onTogglePin = { row -> vm.setPinned(row.sessionId, !row.pinned) },
+        // Archived rows are hidden from the drawer, so this is the archive action;
+        // restoring one is done by searching the archive, which a watch screen has no
+        // room for. Archiving is therefore reversible from the web UI only.
+        onToggleArchive = { row -> vm.setArchived(row.sessionId, true) },
         onSend = { vm.send(it) },
         onStop = { vm.stop() },
-        onModelClick = { showModelPicker = true },
+        onModelClick = openModelPicker,
         onDismissError = { vm.dismissError() },
         onAllow = { vm.answerApproval(true) },
         onReject = { vm.answerApproval(false) },
@@ -287,7 +311,7 @@ private fun DshRoot(
                     onAppearance = onAppearance,
                     onLoadSettings = { vm.loadSettings() },
                     onSetting = { ns, path, value -> vm.updateSetting(ns, path, value) },
-                    onModelClick = { showModelPicker = true },
+                    onModelClick = openModelPicker,
                     onBack = { showSettings = false },
                     onUnpair = {
                         app.unpair()

@@ -57,6 +57,8 @@ fun ChatScaffold(
     onSelectSession: (String) -> Unit,
     onNewSession: () -> Unit,
     onOpenSettings: () -> Unit,
+    onTogglePin: (dev.dsh.nativeapp.data.SessionRow) -> Unit = {},
+    onToggleArchive: (dev.dsh.nativeapp.data.SessionRow) -> Unit = {},
     onSend: (String) -> Unit,
     onStop: () -> Unit,
     onModelClick: () -> Unit,
@@ -163,6 +165,8 @@ fun ChatScaffold(
                     drawerOpen = false
                     onOpenSettings()
                 },
+                onTogglePin = onTogglePin,
+                onToggleArchive = onToggleArchive,
             )
         }
     }

@@ -196,6 +196,51 @@ class DshRepository(private val client: DshClient) {
     /** One `session/projections` answer: revision plus the value bag. */
     data class ProjectionSnapshot(val asOfSeq: Long, val values: JsonObject)
 
+    // ---------------------------------------------------------- session index
+
+    /**
+     * Pin or unpin a session in the drawer.
+     *
+     * @returns the host's new pinned id list, so the caller can apply it without a
+     *   reconnect (the `workspace/follow` `pinned` frame carries the same payload).
+     */
+    suspend fun setPinned(sessionId: String, pinned: Boolean): List<String>? =
+        withContext(Dispatchers.IO) {
+            val method = if (pinned) "workspace/pinSession" else "workspace/unpinSession"
+            runCatching {
+                val value = client.call(
+                    method,
+                    buildJsonObject { put("request", buildJsonObject { put("sessionId", sessionId) }) },
+                )
+                val ids = (value as? JsonObject)?.get("pinnedSessionIds") as? JsonArray
+                ids.orEmpty().mapNotNull { (it as? JsonPrimitive)?.content }
+            }.getOrNull()
+        }
+
+    /**
+     * Archive or restore a session.
+     *
+     * `stopActivity` is sent as `false`: archiving is a drawer-organisation action,
+     * and killing a running turn because the row was tidied away would be a surprise.
+     */
+    suspend fun setArchived(sessionId: String, archived: Boolean): List<String>? =
+        withContext(Dispatchers.IO) {
+            val method = if (archived) "workspace/archiveSession" else "workspace/unarchiveSession"
+            runCatching {
+                val value = client.call(
+                    method,
+                    buildJsonObject {
+                        put("request", buildJsonObject {
+                            put("sessionId", sessionId)
+                            if (archived) put("stopActivity", false)
+                        })
+                    },
+                )
+                val ids = (value as? JsonObject)?.get("archivedSessionIds") as? JsonArray
+                ids.orEmpty().mapNotNull { (it as? JsonPrimitive)?.content }
+            }.getOrNull()
+        }
+
     // -------------------------------------------------------------- settings
 
     /**

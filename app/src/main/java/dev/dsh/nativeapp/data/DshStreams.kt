@@ -15,9 +15,21 @@ class DshStreams(private val client: DshClient) {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    /** Follow the workspace index; [onBaseline] fires once, [onChange] on every update. */
+    /**
+     * Follow the workspace index.
+     *
+     * The host answers a `baseline` once and then pushes targeted frames as the
+     * index changes. `pinned` carries only the pinned ids and `archived` only the
+     * archived ones, so a pin action lands here without a reconnect.
+     *
+     * @param onBaseline full index on attach.
+     * @param onPinned pinned ids after a pin/unpin.
+     * @param onArchived archived ids after an archive/unarchive.
+     */
     fun followWorkspaces(
         onBaseline: (WorkspaceBaseline) -> Unit,
+        onPinned: (List<String>) -> Unit = {},
+        onArchived: (List<String>) -> Unit = {},
         onError: (Throwable) -> Unit = {},
     ): DshStream = client.stream(
         endpoint = "workspace/follow",
@@ -31,11 +43,19 @@ class DshStreams(private val client: DshClient) {
                         obj["value"]?.jsonObject ?: JsonObject(emptyMap()),
                     )
                 }.onSuccess(onBaseline)
+                "pinned" -> readIds(obj["pinnedSessionIds"]).let(onPinned)
+                "archived" -> readIds(obj["archivedSessionIds"]).let(onArchived)
                 else -> Unit
             }
         },
         onError = onError,
     )
+
+    /** Read a `["session-…"]` array from a frame, tolerating either nesting. */
+    private fun readIds(element: kotlinx.serialization.json.JsonElement?): List<String> {
+        val array = element as? kotlinx.serialization.json.JsonArray ?: return emptyList()
+        return array.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+    }
 
     /**
      * Follow one session: history page first, then live events and assistant frames.

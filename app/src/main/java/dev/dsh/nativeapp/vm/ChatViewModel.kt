@@ -50,6 +50,14 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
     val chat: StateFlow<ChatUiState> = _chat.asStateFlow()
 
     private var activeBuilder = TimelineBuilder()
+
+    /** Sessions the operator pinned in the drawer; the host owns this list. */
+    private val _pinnedSessionIds = MutableStateFlow<Set<String>>(emptySet())
+    val pinnedSessionIds: StateFlow<Set<String>> = _pinnedSessionIds.asStateFlow()
+
+    /** Archived sessions, hidden from the drawer unless the filter is turned off. */
+    private val _archivedSessionIds = MutableStateFlow<Set<String>>(emptySet())
+    val archivedSessionIds: StateFlow<Set<String>> = _archivedSessionIds.asStateFlow()
     private var activeStream: DshStream? = null
     private var workspaceStream: DshStream? = null
     private var workspaceIndex: Map<String, WorkspaceSummary> = emptyMap()
@@ -257,6 +265,32 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
     /** Re-read the index; called when the drawer opens so the list is never stale. */
     fun refreshIndexNow() = refreshIndex()
 
+    /** Pin or unpin a session; the host answers with the authoritative id list. */
+    fun setPinned(sessionId: String, pinned: Boolean) {
+        viewModelScope.launch {
+            val ids = repo.setPinned(sessionId, pinned)
+            if (ids == null) {
+                _chat.value = _chat.value.copy(error = if (pinned) "置顶失败" else "取消置顶失败")
+                return@launch
+            }
+            _pinnedSessionIds.value = ids.toSet()
+            regroup()
+        }
+    }
+
+    /** Archive or restore a session, hiding it from the drawer. */
+    fun setArchived(sessionId: String, archived: Boolean) {
+        viewModelScope.launch {
+            val ids = repo.setArchived(sessionId, archived)
+            if (ids == null) {
+                _chat.value = _chat.value.copy(error = if (archived) "归档失败" else "恢复失败")
+                return@launch
+            }
+            _archivedSessionIds.value = ids.toSet()
+            regroup()
+        }
+    }
+
     // ------------------------------------------------------------ history
 
     /** Guards against stacking page fetches while one is in flight. */
@@ -399,6 +433,16 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         workspaceStream = streams.followWorkspaces(
             onBaseline = { baseline ->
                 workspaceIndex = baseline.items.associateBy { it.workspaceId }
+                _pinnedSessionIds.value = baseline.pinnedSessionIds.toSet()
+                _archivedSessionIds.value = baseline.archivedSessionIds.toSet()
+                viewModelScope.launch { regroup() }
+            },
+            onPinned = { ids ->
+                _pinnedSessionIds.value = ids.toSet()
+                viewModelScope.launch { regroup() }
+            },
+            onArchived = { ids ->
+                _archivedSessionIds.value = ids.toSet()
                 viewModelScope.launch { regroup() }
             },
         )
@@ -406,15 +450,23 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
 
     private suspend fun regroup() {
         val rows = _sessions.value.associateBy { it.sessionId }
-        // Recently used sessions first, both inside a workspace and across
-        // workspaces, so the list opens on what was actually last touched.
+        val pinned = _pinnedSessionIds.value
+        val archived = _archivedSessionIds.value
+        // Recently used first, but pinned sessions lead and archived ones are
+        // dropped: a pinned conversation is what the operator wants at the top of the
+        // drawer, and an archived one is deliberately out of the way.
         val groups = workspaceIndex.values.map { workspace ->
             WorkspaceGroup(
                 workspaceId = workspace.workspaceId,
                 title = workspace.displayName,
                 sessions = workspace.sessionIds
                     .mapNotNull { rows[it] }
-                    .sortedByDescending { it.updatedAt },
+                    .filter { it.sessionId !in archived }
+                    .sortedWith(
+                        compareByDescending<SessionRow> { it.sessionId in pinned }
+                            .thenByDescending { it.updatedAt },
+                    )
+                    .map { it.copy(pinned = it.sessionId in pinned) },
             )
         }.filter { it.sessions.isNotEmpty() }
             .sortedByDescending { group -> group.sessions.maxOfOrNull { it.updatedAt } ?: 0L }
@@ -505,6 +557,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                         modelName = selection?.second ?: _chat.value.modelName,
                         reasoningEffort = selection?.third ?: _chat.value.reasoningEffort,
                         contextBreakdown = extras?.breakdown ?: _chat.value.contextBreakdown,
+                        contextOccupancy = extras?.occupancy ?: _chat.value.contextOccupancy,
                         sessionStats = extras?.stats ?: _chat.value.sessionStats,
                         contextWindow = extras?.window ?: _chat.value.contextWindow,
                         queued = extras?.queued ?: _chat.value.queued,
@@ -624,6 +677,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
             val selection = detectModelSelection(envelope)
             _chat.value = _chat.value.copy(
                 contextBreakdown = extras.breakdown ?: _chat.value.contextBreakdown,
+                contextOccupancy = extras.occupancy ?: _chat.value.contextOccupancy,
                 sessionStats = extras.stats ?: _chat.value.sessionStats,
                 contextWindow = extras.window ?: _chat.value.contextWindow,
                 queued = extras.queued,
@@ -653,9 +707,10 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         return Triple(provider, model, effort)
     }
 
-    /** Context split and session counters shown in the info sheet. */
+    /** Context split, occupancy, and session counters shown in the info sheet. */
     private data class Extras(
         val breakdown: ContextBreakdown?,
+        val occupancy: ContextOccupancy?,
         val stats: SessionStats?,
         val pressure: Long?,
         val window: Int?,
@@ -671,6 +726,8 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         fun num(container: JsonObject?, key: String): Long? =
             dev.dsh.nativeapp.data.JsonText.long(container?.get(key))
 
+        // The prompt's composition. This is NOT the window occupancy: it says what
+        // the prompt is made of, while `contextPressure` says how full the window is.
         val breakdownObj = values["contextBreakdown"] as? JsonObject
         val breakdown = breakdownObj?.let {
             ContextBreakdown(
@@ -689,15 +746,30 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                 toolMs = num(it, "toolMs") ?: 0,
                 decodeTokens = num(it, "decodeTokens") ?: 0,
                 ttftMs = num(it, "ttftMs") ?: 0,
+                decodeMs = num(it, "decodeMs") ?: 0,
+                ttftSteps = num(it, "ttftSteps")?.toInt() ?: 0,
             )
         }
 
+        // Occupancy follows the web client's `contextOccupancy` exactly:
+        // `projectedTokens ?? pressureTokens` against `contextWindow`. The previous
+        // code read `pressureTokens` first, which is the *last measured* figure and
+        // lags the projection, so the meter read low right after a compaction.
         val pressureObj = values["contextPressure"] as? JsonObject
+        val used = num(pressureObj, "projectedTokens") ?: num(pressureObj, "pressureTokens")
+        val window = num(pressureObj, "contextWindow")
+        val occupancy = if (used != null && window != null && window > 0) {
+            ContextOccupancy(usedTokens = used, contextWindow = window)
+        } else {
+            null
+        }
+
         return Extras(
             breakdown = breakdown,
+            occupancy = occupancy,
             stats = stats,
-            pressure = num(pressureObj, "pressureTokens") ?: num(pressureObj, "projectedTokens"),
-            window = num(pressureObj, "contextWindow")?.toInt(),
+            pressure = used,
+            window = window?.toInt(),
             questions = parseQuestions(values["userQuestions"] as? JsonObject),
             queued = parseQueue(values["inbox"] as? JsonObject),
         )
@@ -1044,7 +1116,13 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
     /** Re-read the settings document. */
     fun loadSettings() {
         viewModelScope.launch {
-            runCatching { repo.settings() }.onSuccess { _settings.value = it }
+            runCatching { repo.settings() }.onSuccess {
+                _settings.value = it
+                // LLM provider configuration lives in settings, so the model
+                // catalog is derived from it. Re-read both together or the picker
+                // keeps offering providers that were just removed.
+                refreshCatalog()
+            }
         }
     }
 
@@ -1063,6 +1141,9 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                 return@launch
             }
             loadSettings()
+            // A model or provider edit changes the catalog, so the picker must see
+            // the new list rather than the one read at startup.
+            refreshCatalog()
         }
     }
 

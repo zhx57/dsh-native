@@ -1,9 +1,6 @@
 package dev.dsh.nativeapp.ui.chat
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,8 +8,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -31,11 +31,27 @@ import dev.dsh.nativeapp.ui.theme.DshSpacing
 import dev.dsh.nativeapp.ui.theme.LocalDshColors
 
 /**
- * Session metrics sheet.
+ * Session statistics, following the web client's own panes.
  *
- * The web app prints three numbers under the transcript: context occupancy, the
- * token totals, and the prompt split. On a phone there is no room for a footer, so
- * the same numbers live behind the info button in the top bar.
+ * The numbers and their sources are taken from the web UI verbatim, because the
+ * earlier version computed several of them differently and disagreed with a browser
+ * showing the same session:
+ *
+ *  - **context used** is `projectedTokens ?? pressureTokens` over `contextWindow`
+ *    (`contextOccupancy`). It is *not* the prompt breakdown; those are different
+ *    quantities, and reading the breakdown as occupancy is what made the figure
+ *    wrong.
+ *  - **cache hit** divides `cacheReadTokens` by *billed* input, which is the sum of
+ *    the three disjoint prompt buckets. Dividing by uncached input alone reported a
+ *    far rosier hit rate than the host's.
+ *  - **TPS** is `decodeTokens / (decodeMs / 1e3)`; the old code divided by TTFT,
+ *    which is a latency, not a duration.
+ *  - **TTFT average** divides by the steps that reported one (`ttftSteps`), not by
+ *    all steps.
+ *
+ * Section titles and row labels are the web client's strings: 上下文已用, 系统提示词,
+ * 工具定义, 对话消息, Token 用量, 未缓存输入, 缓存读取, 缓存写入, 输出, 会话统计,
+ * 模型用时, 工具调用用时, 首 token 平均（TTFT）, 输出速度（TPS）.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,106 +72,127 @@ fun SessionInfoSheet(
         Column(
             Modifier
                 .fillMaxWidth()
-                // A watch screen is shorter than this content, so the sheet body
-                // must scroll: without a height cap the sections below the fold
-                // were unreachable.
+                // A watch screen is shorter than this content, so the sheet body must
+                // scroll; without the cap the sections below the fold were unreachable.
                 .heightIn(max = 440.dp)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = DshSpacing.md.dp),
             verticalArrangement = Arrangement.spacedBy(DshSpacing.sm.dp),
         ) {
             Text(
-                text = "会话信息",
+                text = "会话统计",
                 fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = colors.labelPrimary,
                 modifier = Modifier.padding(top = DshSpacing.sm.dp),
             )
 
-            // ---- 1. Context occupancy -------------------------------------
-            val used = state.tokenUsage
-            val window = state.contextWindow
-            val pressure = state.contextBreakdown?.total ?: 0L
-            SectionCard {
-                MetricTitle("上下文占用")
-                if (window != null && window > 0) {
-                    val tokens = state.contextWindow.let { w ->
-                        // Prefer the pressure figure when present; it is what the
-                        // host uses for compaction decisions.
-                        if (pressure > 0) pressure else used?.let { it.input + it.output } ?: 0L
-                    }
-                    Text(
-                        text = "${fmt(tokens)} / ${fmt(window.toLong())}",
-                        fontSize = 19.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.labelPrimary,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    CapacityBar(fraction = (tokens.toFloat() / window).coerceIn(0f, 1f))
-                    Spacer(Modifier.height(5.dp))
-                    Text(
-                        text = "剩余 ${fmt((window - tokens).coerceAtLeast(0))} · ${percent(tokens, window.toLong())}",
-                        fontSize = 11.5.sp,
-                        color = colors.labelTertiary,
-                    )
-                } else {
-                    Text(text = "等待会话数据", fontSize = 12.sp, color = colors.labelTertiary)
-                }
-            }
-
-            // ---- 2. Token totals ------------------------------------------
-            SectionCard {
-                MetricTitle("Token 用量")
-                if (used != null) {
-                    MetricRow("输入", fmt(used.input), hint = "未命中缓存")
-                    MetricRow("输出", fmt(used.output))
-                    MetricRow("缓存读取", fmt(used.cacheRead))
-                    Divider()
-                    MetricRow("总计", fmt(used.input + used.output), emphasis = true)
-                } else {
-                    Text(text = "尚无用量", fontSize = 12.sp, color = colors.labelTertiary)
-                }
-            }
-
-            // ---- 3. Prompt split ------------------------------------------
-            SectionCard {
-                MetricTitle("上下文构成")
-                val breakdown = state.contextBreakdown
-                if (breakdown != null && breakdown.total > 0) {
-                    BreakdownBar(breakdown.systemTokens, breakdown.toolsTokens, breakdown.messageTokens)
-                    Spacer(Modifier.height(8.dp))
-                    MetricRow("系统提示", fmt(breakdown.systemTokens), hint = percent(breakdown.systemTokens, breakdown.total))
-                    MetricRow("工具定义", fmt(breakdown.toolsTokens), hint = percent(breakdown.toolsTokens, breakdown.total))
-                    MetricRow("对话消息", fmt(breakdown.messageTokens), hint = percent(breakdown.messageTokens, breakdown.total))
-                } else {
-                    Text(text = "尚无数据", fontSize = 12.sp, color = colors.labelTertiary)
-                }
-            }
-
-            val stats = state.sessionStats
-            if (stats != null) {
-                SectionCard {
-                    MetricTitle("运行统计")
-                    MetricRow("轮次", stats.turns.toString())
-                    MetricRow("步数", stats.steps.toString())
-                    MetricRow("模型耗时", duration(stats.llmMs))
-                    MetricRow("工具耗时", duration(stats.toolMs))
-                    if (stats.decodeTokens > 0) {
-                        MetricRow("生成速度", "${(stats.decodeTokens * 1000.0 / stats.ttftMs.coerceAtLeast(1)).toInt()} tok/s")
-                    }
-                }
-            }
+            ContextCard(state)
+            UsageCard(state)
+            StatsCard(state)
 
             SectionCard {
                 MetricTitle("当前配置")
                 MetricRow("模型", modelLabel ?: "—")
                 MetricRow("思考等级", state.reasoningEffort?.let { effortLabel(it) } ?: "—")
-                MetricRow("权限", state.permissionPreset ?: "—")
+                MetricRow("权限", state.permissionPreset?.let { permissionShortLabel(it) } ?: "—")
                 MetricRow("会话 ID", state.sessionId?.takeLast(12) ?: "—")
             }
 
             Spacer(Modifier.height(DshSpacing.xl.dp))
         }
+    }
+}
+
+/** 上下文已用: the meter's own figure, plus what the prompt is made of. */
+@Composable
+private fun ContextCard(state: ChatUiState) {
+    val colors = LocalDshColors.current
+    val occupancy = state.contextOccupancy
+    val breakdown = state.contextBreakdown
+
+    SectionCard {
+        MetricTitle("上下文已用")
+        if (occupancy != null && occupancy.contextWindow > 0) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Text(
+                    text = "${occupancy.percent}%",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.labelPrimary,
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = "${fmt(occupancy.usedTokens)} / ${fmt(occupancy.contextWindow)}",
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = colors.labelSecondary,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            CapacityBar(
+                fraction = (occupancy.usedTokens.toFloat() / occupancy.contextWindow).coerceIn(0f, 1f),
+            )
+            Spacer(Modifier.height(5.dp))
+            Text(
+                text = "剩余 ${fmt(occupancy.remaining)}",
+                fontSize = 11.5.sp,
+                color = colors.labelTertiary,
+            )
+        } else {
+            Text(text = "等待会话数据", fontSize = 12.sp, color = colors.labelTertiary)
+        }
+
+        if (breakdown != null && breakdown.total > 0) {
+            Spacer(Modifier.height(8.dp))
+            BreakdownBar(breakdown.systemTokens, breakdown.toolsTokens, breakdown.messageTokens)
+            Spacer(Modifier.height(7.dp))
+            MetricRow("系统提示词", fmt(breakdown.systemTokens), hint = percent(breakdown.systemTokens, breakdown.total))
+            MetricRow("工具定义", fmt(breakdown.toolsTokens), hint = percent(breakdown.toolsTokens, breakdown.total))
+            MetricRow("对话消息", fmt(breakdown.messageTokens), hint = percent(breakdown.messageTokens, breakdown.total))
+        }
+    }
+}
+
+/** Token 用量: the four billed buckets, plus the cache-hit share the web shows. */
+@Composable
+private fun UsageCard(state: ChatUiState) {
+    val usage = state.tokenUsage
+    SectionCard {
+        MetricTitle("Token 用量")
+        if (usage == null) {
+            Text(text = "尚无用量", fontSize = 12.sp, color = LocalDshColors.current.labelTertiary)
+            return@SectionCard
+        }
+        MetricRow("未缓存输入", fmt(usage.input))
+        MetricRow("缓存读取", fmt(usage.cacheRead))
+        if (usage.cacheWrite > 0) MetricRow("缓存写入", fmt(usage.cacheWrite))
+        MetricRow("输出", fmt(usage.output))
+        Divider()
+        MetricRow("计费输入", fmt(usage.billedInput), emphasis = true)
+        usage.cacheHitPercent?.let { hit ->
+            MetricRow("缓存命中", "$hit%")
+        }
+    }
+}
+
+/**
+ * 会话统计: counters and timing, each guarded by the same "is it meaningful" tests the
+ * web client uses before showing a row.
+ */
+@Composable
+private fun StatsCard(state: ChatUiState) {
+    val stats = state.sessionStats ?: return
+    SectionCard {
+        MetricTitle("会话统计")
+        MetricRow("轮次 / 步数", "${stats.turns} 轮 ${stats.steps} 步")
+        if (stats.llmMs > 0) MetricRow("模型用时", duration(stats.llmMs))
+        if (stats.toolMs > 0) MetricRow("工具调用用时", duration(stats.toolMs))
+        stats.averageTtftMs?.let { MetricRow("首 token 平均（TTFT）", duration(it)) }
+        stats.tokensPerSecond?.let { MetricRow("输出速度（TPS）", "${formatTps(it)} tok/s") }
     }
 }
 
@@ -226,7 +263,7 @@ private fun Divider() {
     )
 }
 
-/** Occupancy bar; turns amber then red as the window fills. */
+/** Occupancy bar; turns amber then red as the window fills, like the web meter. */
 @Composable
 private fun CapacityBar(fraction: Float) {
     val colors = LocalDshColors.current
@@ -293,3 +330,7 @@ private fun duration(ms: Long): String = when {
     ms >= 1_000 -> String.format("%.1fs", ms / 1000.0)
     else -> "${ms}ms"
 }
+
+/** Whole tokens from ten up, one decimal below — the web's `formatTokensPerSecond`. */
+private fun formatTps(tps: Double): String =
+    if (tps >= 10) tps.toInt().toString() else String.format("%.1f", tps)

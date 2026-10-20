@@ -31,6 +31,8 @@ data class ChatUiState(
     val modelName: String? = null,
     val reasoningEffort: String? = null,
     val contextBreakdown: ContextBreakdown? = null,
+    /** Window fullness, from `contextPressure`; the figure the meter shows. */
+    val contextOccupancy: ContextOccupancy? = null,
     val sessionStats: SessionStats? = null,
     /** `ask_user_question` batches awaiting an answer. */
     val questions: List<PendingQuestion> = emptyList(),
@@ -96,7 +98,36 @@ data class SessionStats(
     val toolMs: Long = 0,
     val decodeTokens: Long = 0,
     val ttftMs: Long = 0,
-)
+    /** Total decode time; the web client divides tokens by this for tok/s. */
+    val decodeMs: Long = 0,
+    /** Steps that reported a TTFT; the average divides by this, not by steps. */
+    val ttftSteps: Int = 0,
+) {
+    /** Output speed, matching the web client's `decodeTokens / (decodeMs / 1e3)`. */
+    val tokensPerSecond: Double? get() = if (decodeMs > 0) decodeTokens / (decodeMs / 1e3) else null
+
+    /** Mean time to first token across the steps that reported one. */
+    val averageTtftMs: Long? get() = if (ttftSteps > 0) ttftMs / ttftSteps else null
+}
+
+/**
+ * Context occupancy, from `contextPressure`.
+ *
+ * The web client's `contextOccupancy` reads `projectedTokens ?? pressureTokens`
+ * against `contextWindow`. These are NOT the same as [ContextBreakdown]: the
+ * breakdown describes what the prompt is made of, while these two describe how full
+ * the window is. Conflating them is what made the app's occupancy figure wrong.
+ */
+data class ContextOccupancy(
+    val usedTokens: Long = 0,
+    val contextWindow: Long = 0,
+) {
+    val percent: Int
+        get() = if (contextWindow <= 0) 0
+        else ((usedTokens.toDouble() / contextWindow) * 100).toInt().coerceIn(0, 100)
+
+    val remaining: Long get() = (contextWindow - usedTokens).coerceAtLeast(0)
+}
 
 /** One todo row from the `todos` projection. */
 data class TodoItem(
@@ -138,6 +169,8 @@ data class SessionRow(
     val updatedAt: Long,
     /** A session with no turn yet; cold start prefers a real conversation. */
     val blank: Boolean = false,
+    /** Pinned sessions sort first in the drawer. */
+    val pinned: Boolean = false,
 )
 
 /** Workspace group in the drawer. */
