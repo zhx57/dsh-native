@@ -233,6 +233,71 @@ class DshRepository(private val client: DshClient) {
 
 
     /**
+     * Upload one attachment and return the receipt id a prompt references.
+     *
+     * `fileUploads/upload` takes base64 and answers with a receipt; the prompt then
+     * carries `{type:"file", receiptId}` instead of inline bytes.
+     */
+    suspend fun uploadAttachment(agentId: String, name: String, bytes: ByteArray): String =
+        withContext(Dispatchers.IO) {
+            val encoded = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            val value = client.call(
+                "fileUploads/upload",
+                buildJsonObject {
+                    put("agentId", agentId)
+                    put("request", buildJsonObject {
+                        put("data", encoded)
+                        put("name", name)
+                    })
+                },
+            )
+            JsonText.string(JsonText.field(value, "receiptId"))
+                ?: JsonText.string(value.jsonObject["receiptId"])
+                ?: JsonText.string(value.jsonObject["id"])
+                ?: error("upload returned no receipt")
+        }
+
+    /** Send a prompt that references previously uploaded files. */
+    suspend fun sendPromptWithFiles(
+        sessionId: String,
+        text: String,
+        receiptIds: List<String>,
+        mode: String = "queue",
+    ) = withContext(Dispatchers.IO) {
+        val content = buildJsonArray {
+            if (text.isNotBlank()) {
+                add(
+                    buildJsonObject {
+                        put("type", "text")
+                        put("text", text)
+                    },
+                )
+            }
+            receiptIds.forEach { receipt ->
+                add(
+                    buildJsonObject {
+                        put("type", "file")
+                        put("receiptId", receipt)
+                    },
+                )
+            }
+        }
+        client.call(
+            "session/prompt",
+            buildJsonObject {
+                put("request", buildJsonObject {
+                    put("requestId", UUID.randomUUID().toString())
+                    put("sessionId", sessionId)
+                    put("mode", mode)
+                    put("content", content)
+                    put("clientTimeZone", java.util.TimeZone.getDefault().id)
+                })
+            },
+        )
+        Unit
+    }
+
+    /**
      * Answer one `ask_user_question` batch.
      *
      * @param answers question id to the selected option labels.

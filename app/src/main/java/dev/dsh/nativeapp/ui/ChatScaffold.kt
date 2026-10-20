@@ -70,6 +70,9 @@ fun ChatScaffold(
     onBranch: (Long) -> Unit,
     onPermissionClick: () -> Unit,
     onAnswerQuestions: (String, Map<String, List<String>>) -> Unit,
+    onPlusClick: () -> Unit,
+    attachmentNames: List<String>,
+    onRemoveAttachment: (Int) -> Unit,
 ) {
     val colors = LocalDshColors.current
     var drawerOpen by remember { mutableStateOf(false) }
@@ -101,6 +104,9 @@ fun ChatScaffold(
                 onBranch = onBranch,
                 onPermissionClick = onPermissionClick,
                 onAnswerQuestions = onAnswerQuestions,
+                onPlusClick = onPlusClick,
+                attachmentNames = attachmentNames,
+                onRemoveAttachment = onRemoveAttachment,
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
             )
         }

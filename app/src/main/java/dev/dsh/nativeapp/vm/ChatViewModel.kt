@@ -415,18 +415,48 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         }
     }
 
+    /** Uploaded attachments waiting to be sent with the next prompt. */
+    private val _attachments = MutableStateFlow<List<Pair<String, String>>>(emptyList())
+    val attachments: StateFlow<List<Pair<String, String>>> = _attachments.asStateFlow()
+
+    /** Upload one picked file and remember its receipt for the next send. */
+    fun addAttachment(name: String, bytes: ByteArray) {
+        val sessionId = _chat.value.sessionId ?: return
+        viewModelScope.launch {
+            runCatching { repo.uploadAttachment(sessionId, name, bytes) }
+                .onSuccess { receipt ->
+                    _attachments.value = _attachments.value + (name to receipt)
+                }
+                .onFailure { error ->
+                    _chat.value = _chat.value.copy(error = describe(error, "上传失败"))
+                }
+        }
+    }
+
+    fun removeAttachment(index: Int) {
+        _attachments.value = _attachments.value.filterIndexed { i, _ -> i != index }
+    }
+
+    /**
+     * Send the draft. Attachments ride along as file references; the plain-prompt
+     * path is used when none are pending.
+     */
     fun send(text: String) {
         val sessionId = _chat.value.sessionId ?: return
         val trimmed = text.trim()
-        if (trimmed.isEmpty()) return
+        val files = _attachments.value.map { it.second }
+        if (trimmed.isEmpty() && files.isEmpty()) return
         val mode = if (_chat.value.running) "steer" else "queue"
         viewModelScope.launch {
-            runCatching { repo.sendPrompt(sessionId, trimmed, mode) }
-                .onSuccess {
-                    // The host titles a session from its first prompt, so pull the
-                    // index again shortly after to surface the generated title.
-                    refreshIndexSoon()
+            runCatching {
+                if (files.isEmpty()) {
+                    repo.sendPrompt(sessionId, trimmed, mode)
+                } else {
+                    repo.sendPromptWithFiles(sessionId, trimmed, files, mode)
+                    _attachments.value = emptyList()
                 }
+            }
+                .onSuccess { refreshIndexSoon() }
                 .onFailure { error ->
                     _chat.value = _chat.value.copy(error = describe(error, "发送失败"))
                 }

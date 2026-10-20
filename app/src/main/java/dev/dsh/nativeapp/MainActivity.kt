@@ -3,8 +3,10 @@ package dev.dsh.nativeapp
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -97,8 +99,19 @@ private fun DshRoot(
     var showModelPicker by remember { mutableStateOf(false) }
     var showInfo by remember { mutableStateOf(false) }
     var showPermission by remember { mutableStateOf(false) }
+    var showPlusMenu by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
     val permissions by vm.permissions.collectAsState()
+    val attachments by vm.attachments.collectAsState()
+
+    // Image picker and generic file picker, both scoped to the current Activity.
+    val imagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent(),
+    ) { uri -> uri?.let { vm.addAttachment(displayNameOf(this, it), readBytesOf(this, it)) } }
+
+    val filePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent(),
+    ) { uri -> uri?.let { vm.addAttachment(displayNameOf(this, it), readBytesOf(this, it)) } }
 
     // Settings is a screen, not a destination the Activity should exit from:
     // back has to return to the transcript.
@@ -106,6 +119,7 @@ private fun DshRoot(
     BackHandler(enabled = showInfo) { showInfo = false }
     BackHandler(enabled = showPermission) { showPermission = false }
     BackHandler(enabled = showModelPicker) { showModelPicker = false }
+    BackHandler(enabled = showPlusMenu) { showPlusMenu = false }
 
     if (showSettings) {
         SettingsScreen(
@@ -157,7 +171,24 @@ private fun DshRoot(
         onBranch = { seq -> vm.branchFrom(seq) },
         onPermissionClick = { showPermission = true },
         onAnswerQuestions = { callId, answers -> vm.answerQuestions(callId, answers) },
+        onPlusClick = { showPlusMenu = true },
+        attachmentNames = attachments.map { it.first },
+        onRemoveAttachment = { vm.removeAttachment(it) },
     )
+
+    if (showPlusMenu) {
+        dev.dsh.nativeapp.ui.chat.ComposerActionSheet(
+            onPick = { action ->
+                showPlusMenu = false
+                when (action) {
+                    dev.dsh.nativeapp.ui.chat.ComposerAction.PickImage -> imagePicker.launch("image/*")
+                    dev.dsh.nativeapp.ui.chat.ComposerAction.PickFile -> filePicker.launch("*/*")
+                    dev.dsh.nativeapp.ui.chat.ComposerAction.SlashCommand -> draft = "/"
+                }
+            },
+            onDismiss = { showPlusMenu = false },
+        )
+    }
 
     if (showPermission) {
         dev.dsh.nativeapp.ui.chat.PermissionSheet(

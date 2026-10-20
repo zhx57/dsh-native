@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -17,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -63,6 +65,9 @@ fun Composer(
     onSubmitCommand: (String) -> Unit = {},
     permissionPreset: String? = null,
     onPermissionClick: () -> Unit = {},
+    onPlusClick: () -> Unit = {},
+    attachmentNames: List<String> = emptyList(),
+    onRemoveAttachment: (Int) -> Unit = {},
 ) {
     val colors = LocalDshColors.current
     var text by remember { mutableStateOf(draft) }
@@ -84,6 +89,13 @@ fun Composer(
                     onDraftChange(completed)
                 },
                 modifier = Modifier.padding(bottom = 6.dp),
+            )
+        }
+        if (attachmentNames.isNotEmpty()) {
+            AttachmentChips(
+                names = attachmentNames,
+                onRemove = onRemoveAttachment,
+                modifier = Modifier.padding(bottom = 4.dp),
             )
         }
         Column(
@@ -135,9 +147,18 @@ fun Composer(
                     .height(30.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // The model chip takes whatever is left after the fixed-size send
-                // button and truncates, so a long model id can never push the
-                // actions off a narrow screen.
+                // Plus menu first, matching the web composer, then the model and
+                // permission chips. Everything left of the send button shares the
+                // remaining width so nothing can push the actions off screen.
+                Icon(
+                    imageVector = Icons.Filled.Add,
+                    contentDescription = "添加",
+                    tint = colors.labelSecondary,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clickable(onClick = onPlusClick),
+                )
+                Spacer(Modifier.width(6.dp))
                 if (modelLabel != null) {
                     Row(
                         Modifier

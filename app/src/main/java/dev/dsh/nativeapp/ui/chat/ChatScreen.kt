@@ -56,6 +56,9 @@ fun ChatScreen(
     onBranch: (Long) -> Unit,
     onPermissionClick: () -> Unit,
     onAnswerQuestions: (String, Map<String, List<String>>) -> Unit,
+    onPlusClick: () -> Unit,
+    attachmentNames: List<String>,
+    onRemoveAttachment: (Int) -> Unit,
     contentPadding: PaddingValues,
 ) {
     val colors = LocalDshColors.current
@@ -247,6 +250,9 @@ fun ChatScreen(
             onSubmitCommand = onRunCommand,
             permissionPreset = state.permissionPreset,
             onPermissionClick = onPermissionClick,
+            onPlusClick = onPlusClick,
+            attachmentNames = attachmentNames,
+            onRemoveAttachment = onRemoveAttachment,
             modifier = Modifier.padding(
                 start = DshSpacing.md.dp,
                 end = DshSpacing.md.dp,

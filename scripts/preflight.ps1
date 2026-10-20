@@ -21,7 +21,11 @@ $required = @{
     'verticalScroll'        = 'androidx.compose.foundation.verticalScroll'
     'rememberScrollState'   = 'androidx.compose.foundation.rememberScrollState'
     'SelectionContainer'    = 'androidx.compose.foundation.text.selection.SelectionContainer'
+    'height'                = 'androidx.compose.foundation.layout.height'
     'heightIn'              = 'androidx.compose.foundation.layout.heightIn'
+    'widthIn'               = 'androidx.compose.foundation.layout.widthIn'
+    'clickable'             = 'androidx.compose.foundation.clickable'
+    'border'                = 'androidx.compose.foundation.border'
     'imePadding'            = 'androidx.compose.foundation.layout.imePadding'
     'navigationBarsPadding' = 'androidx.compose.foundation.layout.navigationBarsPadding'
     'statusBarsPadding'     = 'androidx.compose.foundation.layout.statusBarsPadding'
@@ -37,8 +41,9 @@ foreach ($file in $files) {
 
     foreach ($symbol in $required.Keys) {
         $import = $required[$symbol]
-        # Only flag real usages: `Symbol` or `Symbol(` or `.Symbol`, not the import line.
-        $usage = [regex]::IsMatch($text, "(?m)^(?!import ).*?(?<![\w.])$symbol\s*[.(]")
+        # Only flag real usages: `Symbol` or `Symbol(` or `.Symbol`. Comment lines
+        # are skipped because a prose mention of a word like "height" is not a call.
+        $usage = [regex]::IsMatch($text, "(?m)^(?!\s*(//|\*|/\*|import )).*?(?<![\w.])$symbol\s*[.(]")
         if (-not $usage) { continue }
         if ($text -match [regex]::Escape("import $import")) { continue }
         # Symbols resolvable through the wildcard-ish stdlib or same package are skipped.
