@@ -22,6 +22,27 @@ data class ChatUiState(
     val modelProvider: String? = null,
     val modelName: String? = null,
     val reasoningEffort: String? = null,
+    val contextBreakdown: ContextBreakdown? = null,
+    val sessionStats: SessionStats? = null,
+)
+
+/** Token split by prompt section, from `contextBreakdown`. */
+data class ContextBreakdown(
+    val systemTokens: Long = 0,
+    val toolsTokens: Long = 0,
+    val messageTokens: Long = 0,
+) {
+    val total: Long get() = systemTokens + toolsTokens + messageTokens
+}
+
+/** Turn/step counters and timing, from `sessionStats`. */
+data class SessionStats(
+    val turns: Int = 0,
+    val steps: Int = 0,
+    val llmMs: Long = 0,
+    val toolMs: Long = 0,
+    val decodeTokens: Long = 0,
+    val ttftMs: Long = 0,
 )
 
 /** One todo row from the `todos` projection. */

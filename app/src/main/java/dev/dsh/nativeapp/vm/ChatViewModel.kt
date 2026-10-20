@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.dsh.nativeapp.DshApplication
 import dev.dsh.nativeapp.data.ChatUiState
+import dev.dsh.nativeapp.data.ContextBreakdown
+import dev.dsh.nativeapp.data.SessionStats
 import dev.dsh.nativeapp.data.DshStream
 import dev.dsh.nativeapp.data.ModelCatalog
 import dev.dsh.nativeapp.data.SessionRow
@@ -151,6 +153,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                 val projections = detectProjections(value)
                 val approval = detectApproval(value)
                 val selection = detectModelSelection(value)
+                val extras = detectExtras(value)
                 viewModelScope.launch {
                     _chat.value = _chat.value.copy(
                         timeline = activeBuilder.snapshot(),
@@ -164,6 +167,9 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                         modelProvider = selection?.first ?: _chat.value.modelProvider,
                         modelName = selection?.second ?: _chat.value.modelName,
                         reasoningEffort = selection?.third ?: _chat.value.reasoningEffort,
+                        contextBreakdown = extras?.breakdown ?: _chat.value.contextBreakdown,
+                        sessionStats = extras?.stats ?: _chat.value.sessionStats,
+                        contextWindow = extras?.window ?: _chat.value.contextWindow,
                     )
                 }
             },
@@ -248,6 +254,52 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         val model = dev.dsh.nativeapp.data.JsonText.string(chosen["model"]) ?: return null
         val effort = dev.dsh.nativeapp.data.JsonText.string(chosen["reasoningEffort"])
         return Triple(provider, model, effort)
+    }
+
+    /** Context split and session counters shown in the info sheet. */
+    private data class Extras(
+        val breakdown: ContextBreakdown?,
+        val stats: SessionStats?,
+        val pressure: Long?,
+        val window: Int?,
+    )
+
+    private fun detectExtras(value: JsonObject): Extras? {
+        if (dev.dsh.nativeapp.data.JsonText.string(value["type"]) != "snapshot") return null
+        val projections = value["projections"] as? JsonObject ?: return null
+        val values = projections["values"] as? JsonObject ?: return null
+
+        fun num(container: JsonObject?, key: String): Long? =
+            dev.dsh.nativeapp.data.JsonText.long(container?.get(key))
+
+        val breakdownObj = values["contextBreakdown"] as? JsonObject
+        val breakdown = breakdownObj?.let {
+            ContextBreakdown(
+                systemTokens = num(it, "systemTokens") ?: 0,
+                toolsTokens = num(it, "toolsTokens") ?: 0,
+                messageTokens = num(it, "messageTokens") ?: 0,
+            )
+        }
+
+        val statsObj = values["sessionStats"] as? JsonObject
+        val stats = statsObj?.let {
+            SessionStats(
+                turns = num(it, "turns")?.toInt() ?: 0,
+                steps = num(it, "steps")?.toInt() ?: 0,
+                llmMs = num(it, "llmMs") ?: 0,
+                toolMs = num(it, "toolMs") ?: 0,
+                decodeTokens = num(it, "decodeTokens") ?: 0,
+                ttftMs = num(it, "ttftMs") ?: 0,
+            )
+        }
+
+        val pressureObj = values["contextPressure"] as? JsonObject
+        return Extras(
+            breakdown = breakdown,
+            stats = stats,
+            pressure = num(pressureObj, "pressureTokens") ?: num(pressureObj, "projectedTokens"),
+            window = num(pressureObj, "contextWindow")?.toInt(),
+        )
     }
 
     private fun TodoItemOf(content: String, status: TodoStatus): TodoItem = TodoItem(content, status)

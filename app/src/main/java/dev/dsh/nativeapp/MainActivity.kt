@@ -93,6 +93,7 @@ private fun DshRoot(
     val catalog by vm.catalog.collectAsState()
 
     var showModelPicker by remember { mutableStateOf(false) }
+    var showInfo by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
 
     if (showSettings) {
@@ -144,7 +145,16 @@ private fun DshRoot(
         onRunCommand = { vm.runCommand(it) },
         draft = draft,
         onDraftChange = { draft = it },
+        onInfo = { showInfo = true },
     )
+
+    if (showInfo) {
+        dev.dsh.nativeapp.ui.chat.SessionInfoSheet(
+            state = chat,
+            modelLabel = modelLabel?.let { "$it$effortSuffix" },
+            onDismiss = { showInfo = false },
+        )
+    }
 
     if (showModelPicker) {
         dev.dsh.nativeapp.ui.chat.ModelPickerSheet(

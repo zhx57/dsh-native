@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -64,6 +65,7 @@ fun ChatScaffold(
     onRunCommand: (String) -> Unit,
     draft: String,
     onDraftChange: (String) -> Unit,
+    onInfo: () -> Unit,
 ) {
     val colors = LocalDshColors.current
     var drawerOpen by remember { mutableStateOf(false) }
@@ -75,6 +77,7 @@ fun ChatScaffold(
                 running = state.running,
                 onMenu = { drawerOpen = true },
                 onNewSession = onNewSession,
+                onInfo = onInfo,
             )
             ChatScreen(
                 state = state,
@@ -137,6 +140,7 @@ private fun TopBar(
     running: Boolean,
     onMenu: () -> Unit,
     onNewSession: () -> Unit,
+    onInfo: () -> Unit,
 ) {
     val colors = LocalDshColors.current
     Row(
@@ -174,6 +178,14 @@ private fun TopBar(
                     Text(text = "运行中", fontSize = 11.sp, color = colors.labelTertiary)
                 }
             }
+        }
+        IconButton(onClick = onInfo, modifier = Modifier.size(38.dp)) {
+            Icon(
+                imageVector = Icons.Outlined.Info,
+                contentDescription = "会话信息",
+                tint = colors.labelSecondary,
+                modifier = Modifier.size(20.dp),
+            )
         }
         IconButton(onClick = onNewSession, modifier = Modifier.size(38.dp)) {
             Icon(
