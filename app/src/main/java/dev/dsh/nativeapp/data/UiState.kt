@@ -28,7 +28,22 @@ data class ChatUiState(
     val questions: List<PendingQuestion> = emptyList(),
     /** Live question pushed on the `$events` channel. */
     val liveQuestion: LiveQuestion? = null,
+    /** Messages accepted while a turn runs, waiting to start the next turn. */
+    val queued: List<QueuedMessage> = emptyList(),
+    /** True while a send is in flight but not yet admitted to the queue. */
+    val sending: Boolean = false,
 )
+
+/** One queued message from the session's `inbox.next-turn` projection. */
+data class QueuedMessage(
+    val id: String,
+    val text: String,
+    val imageCount: Int = 0,
+    val fileNames: List<String> = emptyList(),
+) {
+    /** Queued messages carrying attachments cannot be edited as plain text. */
+    val editable: Boolean get() = imageCount == 0 && fileNames.isEmpty()
+}
 
 /** A question delivered as a Host waterfall on `$events`. */
 data class LiveQuestion(

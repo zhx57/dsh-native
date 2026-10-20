@@ -70,6 +70,9 @@ fun ChatScreen(
     onPermissionClick: () -> Unit,
     onAnswerQuestions: (String, Map<String, List<String>>) -> Unit,
     onLoadOlder: () -> Unit,
+    onSteerQueued: (String) -> Unit,
+    onEditQueued: (String, String) -> Unit,
+    onRemoveQueued: (String) -> Unit,
     onPlusClick: () -> Unit,
     attachmentNames: List<String>,
     onRemoveAttachment: (Int) -> Unit,
@@ -248,6 +251,27 @@ fun ChatScreen(
 
         // Pending questions are answered on their own full-screen surface, not here:
         // the composer column does not scroll, so an inline card was unusable.
+
+        // Messages accepted while a turn runs wait here rather than disappearing.
+        if (state.sending) {
+            Text(
+                text = "发送中…",
+                fontSize = 11.sp,
+                color = colors.labelTertiary,
+                modifier = Modifier.padding(horizontal = DshSpacing.md.dp, vertical = 2.dp),
+            )
+        }
+        QueueDock(
+            queued = state.queued,
+            running = state.running,
+            onSteer = onSteerQueued,
+            onEdit = onEditQueued,
+            onRemove = onRemoveQueued,
+            modifier = Modifier.padding(
+                horizontal = DshSpacing.md.dp,
+                vertical = DshSpacing.xs.dp,
+            ),
+        )
 
         if (state.pendingApproval != null) {
             ApprovalCard(

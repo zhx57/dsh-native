@@ -317,6 +317,50 @@ class DshRepository(private val client: DshClient) {
     }
 
     /**
+     * Mutate one queued message.
+     *
+     * The queue is the session's `inbox.next-turn` projection: messages accepted
+     * while a turn runs and waiting to wake the next one. `kind` is `edit`, `remove`
+     * or `steer` (send now, interrupting the running turn).
+     */
+    suspend fun updateQueue(
+        sessionId: String,
+        itemId: String,
+        kind: String,
+        text: String? = null,
+    ) = withContext(Dispatchers.IO) {
+        client.call(
+            "session/updateQueue",
+            buildJsonObject {
+                put("request", buildJsonObject {
+                    put("sessionId", sessionId)
+                    put("itemId", itemId)
+                    put(
+                        "action",
+                        buildJsonObject {
+                            put("kind", kind)
+                            if (kind == "edit" && text != null) {
+                                put(
+                                    "content",
+                                    buildJsonArray {
+                                        add(
+                                            buildJsonObject {
+                                                put("type", "text")
+                                                put("text", text)
+                                            },
+                                        )
+                                    },
+                                )
+                            }
+                        },
+                    )
+                })
+            },
+        )
+        Unit
+    }
+
+    /**
      * Answer one `ask_user_question` batch.
      *
      * @param answers question id to the selected option labels.

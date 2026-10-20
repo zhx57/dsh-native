@@ -20,6 +20,7 @@ import dev.dsh.nativeapp.data.LiveQuestion
 import dev.dsh.nativeapp.data.PendingRequest
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import dev.dsh.nativeapp.data.QueuedMessage
 import dev.dsh.nativeapp.data.PendingApproval
 import dev.dsh.nativeapp.data.PendingQuestion
 import dev.dsh.nativeapp.data.QuestionItem
@@ -129,6 +130,50 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
     /** Hide the question panel without answering; the Host stays blocked. */
     fun dismissLiveQuestion() {
         _chat.value = _chat.value.copy(liveQuestion = null)
+    }
+
+    /** Remove a queued message that has not started its turn yet. */
+    fun removeQueued(itemId: String) {
+        val sessionId = _chat.value.sessionId ?: return
+        _chat.value = _chat.value.copy(
+            queued = _chat.value.queued.filterNot { it.id == itemId },
+        )
+        viewModelScope.launch {
+            runCatching { repo.updateQueue(sessionId, itemId, "remove") }
+                .onFailure { error ->
+                    _chat.value = _chat.value.copy(error = describe(error, "删除排队消息失败"))
+                    refreshIndex()
+                }
+        }
+    }
+
+    /** Replace the text of a queued message. */
+    fun editQueued(itemId: String, text: String) {
+        val sessionId = _chat.value.sessionId ?: return
+        if (text.isBlank()) return
+        viewModelScope.launch {
+            runCatching { repo.updateQueue(sessionId, itemId, "edit", text) }
+                .onFailure { error ->
+                    _chat.value = _chat.value.copy(error = describe(error, "修改排队消息失败"))
+                }
+        }
+    }
+
+    /**
+     * Send a queued message now, interrupting the running turn.
+     *
+     * This is the web UI's 插话发送: only meaningful while a turn runs, which the
+     * Host enforces.
+     */
+    fun steerQueued(itemId: String) {
+        val sessionId = _chat.value.sessionId ?: return
+        if (!_chat.value.running) return
+        viewModelScope.launch {
+            runCatching { repo.updateQueue(sessionId, itemId, "steer") }
+                .onFailure { error ->
+                    _chat.value = _chat.value.copy(error = describe(error, "插话发送失败"))
+                }
+        }
     }
 
     /** Submit answers for the live question and clear the card. */
@@ -391,6 +436,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                         contextBreakdown = extras?.breakdown ?: _chat.value.contextBreakdown,
                         sessionStats = extras?.stats ?: _chat.value.sessionStats,
                         contextWindow = extras?.window ?: _chat.value.contextWindow,
+                        queued = extras?.queued ?: _chat.value.queued,
                     )
                 }
             },
@@ -489,6 +535,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         val pressure: Long?,
         val window: Int?,
         val questions: List<PendingQuestion>,
+        val queued: List<QueuedMessage>,
     )
 
     private fun detectExtras(value: JsonObject): Extras? {
@@ -527,7 +574,38 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
             pressure = num(pressureObj, "pressureTokens") ?: num(pressureObj, "projectedTokens"),
             window = num(pressureObj, "contextWindow")?.toInt(),
             questions = parseQuestions(values["userQuestions"] as? JsonObject),
+            queued = parseQueue(values["inbox"] as? JsonObject),
         )
+    }
+
+    /**
+     * Read `inbox.next-turn`: messages admitted while a turn ran.
+     *
+     * This is the same source the web UI's queue dock uses. `next-step` is separate
+     * — those messages are folded into the running turn rather than queued behind it.
+     */
+    private fun parseQueue(inbox: JsonObject?): List<QueuedMessage> {
+        val rows = inbox?.get("next-turn") as? kotlinx.serialization.json.JsonArray
+            ?: return emptyList()
+        return rows.mapNotNull { element ->
+            val msg = element as? JsonObject ?: return@mapNotNull null
+            val id = dev.dsh.nativeapp.data.JsonText.string(msg["id"]) ?: return@mapNotNull null
+            val content = msg["content"] as? kotlinx.serialization.json.JsonArray ?: return@mapNotNull null
+            val text = content.mapNotNull { block ->
+                val obj = block as? JsonObject ?: return@mapNotNull null
+                if (dev.dsh.nativeapp.data.JsonText.string(obj["type"]) != "text") return@mapNotNull null
+                dev.dsh.nativeapp.data.JsonText.string(obj["text"])
+            }.joinToString("\n")
+            val images = content.count {
+                dev.dsh.nativeapp.data.JsonText.string(dev.dsh.nativeapp.data.JsonText.field(it, "type")) == "image"
+            }
+            val files = content.mapNotNull { block ->
+                val obj = block as? JsonObject ?: return@mapNotNull null
+                if (dev.dsh.nativeapp.data.JsonText.string(obj["type"]) != "file") return@mapNotNull null
+                dev.dsh.nativeapp.data.JsonText.string(obj["name"]) ?: "附件"
+            }
+            QueuedMessage(id = id, text = text, imageCount = images, fileNames = files)
+        }
     }
 
     /**
@@ -661,6 +739,9 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         val files = _attachments.value.map { it.second }
         if (trimmed.isEmpty() && files.isEmpty()) return
         val mode = if (_chat.value.running) "steer" else "queue"
+        // Surface the in-flight window: the host admits the prompt and only then
+        // lists it in the inbox, so without this the message briefly vanishes.
+        _chat.value = _chat.value.copy(sending = true)
         viewModelScope.launch {
             runCatching {
                 if (files.isEmpty()) {
@@ -674,6 +755,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                 .onFailure { error ->
                     _chat.value = _chat.value.copy(error = describe(error, "发送失败"))
                 }
+            _chat.value = _chat.value.copy(sending = false)
         }
     }
 
