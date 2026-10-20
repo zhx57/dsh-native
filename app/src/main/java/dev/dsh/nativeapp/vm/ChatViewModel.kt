@@ -16,6 +16,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import dev.dsh.nativeapp.data.LiveQuestion
+import dev.dsh.nativeapp.data.PendingRequest
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import dev.dsh.nativeapp.data.PendingApproval
 import dev.dsh.nativeapp.data.PendingQuestion
 import dev.dsh.nativeapp.data.QuestionItem
@@ -55,6 +59,90 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         followWorkspaces()
         loadPermissionOptions()
         startIndexPolling()
+        listenForRequests()
+    }
+
+    /**
+     * Listen on `$events` for interactive requests.
+     *
+     * `ask_user_question` and tool approvals are Host waterfalls delivered on this
+     * channel, not as answerable rows in the session log. The `userQuestions`
+     * projection only mirrors them when the tool declares a timed `timeout`, so this
+     * channel is the reliable source: the Host pushes the frame either way.
+     */
+    private fun listenForRequests() {
+        val channel = app.events()
+        channel.start(
+            onError = { error ->
+                _chat.value = _chat.value.copy(error = describe(error, "事件通道断开"))
+            },
+        )
+        viewModelScope.launch {
+            channel.requests.collect { request ->
+                when (request) {
+                    is PendingRequest.Question -> {
+                        _chat.value = _chat.value.copy(
+                            liveQuestion = LiveQuestion(
+                                eventId = request.eventId,
+                                questions = request.questions,
+                            ),
+                        )
+                    }
+                    is PendingRequest.Approval -> {
+                        _chat.value = _chat.value.copy(
+                            pendingApproval = PendingApproval(
+                                callId = request.eventId,
+                                toolName = request.toolName,
+                                reason = request.reason,
+                                detail = request.detail,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /** Submit answers for the live question and clear the card. */
+    fun answerLiveQuestion(answers: Map<String, List<String>>) {
+        val live = _chat.value.liveQuestion ?: return
+        val request = PendingRequest.Question(live.eventId, _chat.value.sessionId, live.questions)
+        _chat.value = _chat.value.copy(liveQuestion = null)
+        viewModelScope.launch {
+            val ok = app.events().answer(request, app.events().answerValue(answers))
+            if (!ok) {
+                _chat.value = _chat.value.copy(
+                    liveQuestion = live,
+                    error = "提交回答失败：事件通道未就绪",
+                )
+            }
+        }
+    }
+
+    /** Approve or reject the live approval request. */
+    fun answerLiveApproval(allowed: Boolean) {
+        val pending = _chat.value.pendingApproval ?: return
+        val request = PendingRequest.Approval(
+            eventId = pending.callId,
+            agentId = _chat.value.sessionId,
+            callId = pending.callId,
+            toolName = pending.toolName,
+            reason = pending.reason,
+            detail = pending.detail,
+        )
+        _chat.value = _chat.value.copy(pendingApproval = null)
+        viewModelScope.launch {
+            val value = buildJsonObject {
+                put("outcome", if (allowed) "allowed-once" else "rejected")
+            }
+            val ok = app.events().answer(request, value)
+            if (!ok) {
+                _chat.value = _chat.value.copy(
+                    pendingApproval = pending,
+                    error = "提交确认失败：事件通道未就绪",
+                )
+            }
+        }
     }
 
     /**

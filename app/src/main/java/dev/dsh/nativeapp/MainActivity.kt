@@ -182,6 +182,7 @@ private fun DshRoot(
         onBranch = { seq -> vm.branchFrom(seq) },
         onPermissionClick = { showPermission = true },
         onAnswerQuestions = { callId, answers -> vm.answerQuestions(callId, answers) },
+        onAnswerLive = { answers -> vm.answerLiveQuestion(answers) },
         onPlusClick = { showPlusMenu = true },
         attachmentNames = attachments.map { it.first },
         onRemoveAttachment = { vm.removeAttachment(it) },

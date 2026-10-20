@@ -26,6 +26,14 @@ data class ChatUiState(
     val sessionStats: SessionStats? = null,
     /** `ask_user_question` batches awaiting an answer. */
     val questions: List<PendingQuestion> = emptyList(),
+    /** Live question pushed on the `$events` channel. */
+    val liveQuestion: LiveQuestion? = null,
+)
+
+/** A question delivered as a Host waterfall on `$events`. */
+data class LiveQuestion(
+    val eventId: String,
+    val questions: List<QuestionPrompt>,
 )
 
 /** One question inside an `ask_user_question` batch. */

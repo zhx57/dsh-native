@@ -2,6 +2,7 @@ package dev.dsh.nativeapp
 
 import android.app.Application
 import dev.dsh.nativeapp.data.DshClient
+import dev.dsh.nativeapp.data.DshEvents
 import dev.dsh.nativeapp.data.DshRepository
 import dev.dsh.nativeapp.data.DshStreams
 import dev.dsh.nativeapp.data.HostStore
@@ -15,6 +16,9 @@ class DshApplication : Application() {
 
     @Volatile
     private var clientRef: DshClient? = null
+
+    @Volatile
+    private var eventsRef: DshEvents? = null
 
     @Volatile
     var currentHost: PairedHost? = null
@@ -43,6 +47,7 @@ class DshApplication : Application() {
         hostStore.clear()
         currentHost = null
         clientRef = null
+        eventsRef = null
     }
 
     val hasHost: Boolean get() = currentHost != null
@@ -52,4 +57,11 @@ class DshApplication : Application() {
     fun repository(): DshRepository = DshRepository(client())
 
     fun streams(): DshStreams = DshStreams(client())
+
+    /** Forwarded-event channel, created once so its `ready` handshake survives screens. */
+    fun events(): DshEvents {
+        val existing = eventsRef
+        if (existing != null) return existing
+        return DshEvents(client()).also { eventsRef = it }
+    }
 }

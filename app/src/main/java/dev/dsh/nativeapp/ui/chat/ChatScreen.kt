@@ -67,6 +67,7 @@ fun ChatScreen(
     onBranch: (Long) -> Unit,
     onPermissionClick: () -> Unit,
     onAnswerQuestions: (String, Map<String, List<String>>) -> Unit,
+    onAnswerLive: (Map<String, List<String>>) -> Unit,
     onPlusClick: () -> Unit,
     attachmentNames: List<String>,
     onRemoveAttachment: (Int) -> Unit,
@@ -218,6 +219,18 @@ fun ChatScreen(
                         .padding(start = 10.dp, top = 2.dp, bottom = 2.dp),
                 )
             }
+        }
+
+        // The authoritative interactive surface: questions pushed on $events.
+        if (state.liveQuestion != null) {
+            LiveQuestionCard(
+                question = state.liveQuestion,
+                onSubmit = onAnswerLive,
+                modifier = Modifier.padding(
+                    horizontal = DshSpacing.md.dp,
+                    vertical = DshSpacing.xs.dp,
+                ),
+            )
         }
 
         if (state.pendingApproval != null) {
