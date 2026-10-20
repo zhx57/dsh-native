@@ -205,6 +205,22 @@ class TimelineBuilder {
             items.add(TimelineItem.AssistantMessage(seq, time, prose))
         }
         blocks.filterIsInstance<ContentBlock.ToolCall>().forEach { call ->
+            // `ask_user_question` must become an interactive card the moment the
+            // assistant message arrives; the later `tool/call` event only confirms
+            // it. Both paths funnel through the same registration below.
+            if (call.name == "ask_user_question") {
+                val prompts = parseQuestionPrompts(call.arguments)
+                if (prompts.isNotEmpty()) {
+                    if (toolIndex.containsKey(call.id)) {
+                        val index = toolIndex.getValue(call.id)
+                        items[index] = TimelineItem.PendingQuestionItem(seq, time, call.id, prompts)
+                    } else {
+                        toolIndex[call.id] = items.size
+                        items.add(TimelineItem.PendingQuestionItem(seq, time, call.id, prompts))
+                    }
+                    return@forEach
+                }
+            }
             if (toolIndex.containsKey(call.id)) return@forEach
             toolIndex[call.id] = items.size
             items.add(
@@ -224,14 +240,23 @@ class TimelineBuilder {
         val name = JsonText.string(data["name"]) ?: "tool"
         val args = JsonText.string(data["arguments"]) ?: ""
 
-        // `ask_user_question` blocks until answered and the host's projection for it
-        // is empty on this deployment, so the pending question is recovered here.
+        // `ask_user_question` blocks until answered and this host's `userQuestions`
+        // projection stays empty (its schema declares no `timeout`, which the
+        // projection requires), so the pending batch is recovered from this event.
+        //
+        // The call is already registered by the `assistant/message` that contained
+        // its `tool-call` block, so an existing row must be *replaced*, not skipped —
+        // early-returning on a known callId is what kept the card from ever showing.
         if (name == "ask_user_question") {
             val prompts = parseQuestionPrompts(args)
             if (prompts.isNotEmpty()) {
-                if (!toolIndex.containsKey(callId)) {
+                val existingIndex = toolIndex[callId]
+                val row = TimelineItem.PendingQuestionItem(seq, time, callId, prompts)
+                if (existingIndex != null && existingIndex < items.size) {
+                    items[existingIndex] = row
+                } else {
                     toolIndex[callId] = items.size
-                    items.add(TimelineItem.PendingQuestionItem(seq, time, callId, prompts))
+                    items.add(row)
                 }
                 return
             }
