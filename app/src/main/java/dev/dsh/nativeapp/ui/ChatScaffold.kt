@@ -145,8 +145,6 @@ private fun TopBar(
     onMenu: () -> Unit,
     onNewSession: () -> Unit,
     onInfo: () -> Unit,
-    onBranch: (Long) -> Unit,
-    onPermissionClick: () -> Unit,
 ) {
     val colors = LocalDshColors.current
     Row(

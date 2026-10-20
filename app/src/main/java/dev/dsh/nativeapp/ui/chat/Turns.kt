@@ -35,6 +35,7 @@ import dev.dsh.nativeapp.ui.theme.DshSpacing
 import dev.dsh.nativeapp.ui.theme.LocalDshColors
 
 /** Operator turn: right-aligned bubble, matching the web transcript. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun UserTurn(
     item: TimelineItem.UserMessage,
@@ -69,6 +70,7 @@ fun UserTurn(
 }
 
 /** Assistant turn: full-width content with reasoning, text and an action row. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun AssistantTurn(
     item: TimelineItem.AssistantMessage,

@@ -89,7 +89,38 @@ fun PermissionChip(
     }
 }
 
-/** Preset list presented as a sheet. */
+/**
+ * Preset list as a modal sheet.
+ *
+ * The experimental `ModalBottomSheet` opt-in stays inside this file so callers
+ * never need to annotate for it.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun PermissionSheet(
+    options: List<String>,
+    current: String?,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(
+            skipPartiallyExpanded = true,
+        ),
+        containerColor = LocalDshColors.current.bgBase,
+        dragHandle = null,
+    ) {
+        PermissionPicker(
+            options = options,
+            current = current,
+            onPick = onPick,
+            onDismiss = onDismiss,
+        )
+    }
+}
+
+/** Preset list body. */
 @Composable
 fun PermissionPicker(
     options: List<String>,

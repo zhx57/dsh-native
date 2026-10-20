@@ -150,7 +150,7 @@ fun SessionInfoSheet(
 }
 
 @Composable
-private fun SectionCard(content: @Composable ColumnScopeContent) {
+private fun SectionCard(content: @Composable () -> Unit) {
     val colors = LocalDshColors.current
     Column(
         Modifier
@@ -162,8 +162,6 @@ private fun SectionCard(content: @Composable ColumnScopeContent) {
         content()
     }
 }
-
-private typealias ColumnScopeContent = @Composable () -> Unit
 
 @Composable
 private fun MetricTitle(text: String) {

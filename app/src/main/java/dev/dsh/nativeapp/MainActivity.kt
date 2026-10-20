@@ -154,23 +154,17 @@ private fun DshRoot(
     )
 
     if (showPermission) {
-        androidx.compose.material3.ModalBottomSheet(
-            onDismissRequest = { showPermission = false },
-            containerColor = LocalDshColors.current.bgBase,
-            dragHandle = null,
-        ) {
-            dev.dsh.nativeapp.ui.chat.PermissionPicker(
-                options = permissions.ifEmpty {
-                    listOf("read-only", "workspace-write", "danger-full-access")
-                },
-                current = chat.permissionPreset,
-                onPick = { preset ->
-                    showPermission = false
-                    vm.setPermission(preset)
-                },
-                onDismiss = { showPermission = false },
-            )
-        }
+        dev.dsh.nativeapp.ui.chat.PermissionSheet(
+            options = permissions.ifEmpty {
+                listOf("read-only", "workspace-write", "danger-full-access")
+            },
+            current = chat.permissionPreset,
+            onPick = { preset ->
+                showPermission = false
+                vm.setPermission(preset)
+            },
+            onDismiss = { showPermission = false },
+        )
     }
 
     if (showInfo) {
