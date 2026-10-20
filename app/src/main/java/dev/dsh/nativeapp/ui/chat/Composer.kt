@@ -2,6 +2,7 @@ package dev.dsh.nativeapp.ui.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -106,6 +107,7 @@ fun Composer(
                     Row(
                         Modifier
                             .background(colors.selector, RoundedCornerShape(DshRadius.full.dp))
+                            .clickable(onClick = onModelClick)
                             .padding(horizontal = 10.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -113,9 +115,6 @@ fun Composer(
                             text = modelLabel,
                             fontSize = 12.sp,
                             color = colors.labelSecondary,
-                            modifier = Modifier
-                                .padding(end = 4.dp)
-                                .then(Modifier),
                         )
                     }
                 } else {

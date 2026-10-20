@@ -64,8 +64,25 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                         }
                         .sortedByDescending { it.updatedAt }
                     regroup()
+                    openMostRecentIfIdle()
+                }
+                .onFailure { error ->
+                    _chat.value = _chat.value.copy(
+                        connecting = false,
+                        error = error.message ?: "无法读取会话列表",
+                    )
                 }
         }
+    }
+
+    /**
+     * Land on the most recent session after a cold start, matching the web app
+     * restoring the last conversation instead of an empty pane.
+     */
+    private fun openMostRecentIfIdle() {
+        if (_chat.value.sessionId != null) return
+        val first = _sessions.value.firstOrNull() ?: return
+        openSession(first.sessionId)
     }
 
     private fun followWorkspaces() {
@@ -113,12 +130,14 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
             onItem = { value ->
                 activeBuilder.applyFollowValue(value)
                 val running = detectRunning(value)
+                val usage = detectUsage(value)
                 viewModelScope.launch {
                     _chat.value = _chat.value.copy(
                         timeline = activeBuilder.snapshot(),
                         title = title,
                         connecting = false,
                         running = running ?: _chat.value.running,
+                        tokenUsage = usage ?: _chat.value.tokenUsage,
                     )
                 }
             },
@@ -140,8 +159,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
 
     /** Read running state from the events the stream carries. */
     private fun detectRunning(value: JsonObject): Boolean? {
-        val type = dev.dsh.nativeapp.data.JsonText.string(value["type"])
-        if (type != "event") return null
+        if (dev.dsh.nativeapp.data.JsonText.string(value["type"]) != "event") return null
         val event = value["event"] as? JsonObject ?: return null
         return when (dev.dsh.nativeapp.data.JsonText.string(event["type"])) {
             "turn/start", "step/start" -> true
@@ -150,9 +168,23 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         }
     }
 
+    /** Pull the token accounting projection out of a snapshot when present. */
+    private fun detectUsage(value: JsonObject): dev.dsh.nativeapp.data.TokenUsage? {
+        if (dev.dsh.nativeapp.data.JsonText.string(value["type"]) != "snapshot") return null
+        val projections = value["projections"] as? JsonObject ?: return null
+        val values = projections["values"] as? JsonObject ?: return null
+        return dev.dsh.nativeapp.data.TokenUsage.from(values["tokenUsage"])
+    }
+
+    /**
+     * Create a session. Without an explicit workspace the host places it under
+     * the active workspace's cwd, so the newest session inherits the same root
+     * the web app would use.
+     */
     fun newSession(workspaceId: String? = null) {
         viewModelScope.launch {
-            runCatching { repo.createSession(workspaceId) }
+            val target = workspaceId ?: workspaceIndex.values.firstOrNull()?.workspaceId
+            runCatching { repo.createSession(target) }
                 .onSuccess { id ->
                     refreshIndex()
                     openSession(id)
@@ -170,9 +202,21 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         val mode = if (_chat.value.running) "steer" else "queue"
         viewModelScope.launch {
             runCatching { repo.sendPrompt(sessionId, trimmed, mode) }
+                .onSuccess {
+                    // The host titles a session from its first prompt, so pull the
+                    // index again shortly after to surface the generated title.
+                    refreshIndexSoon()
+                }
                 .onFailure { error ->
                     _chat.value = _chat.value.copy(error = error.message ?: "发送失败")
                 }
+        }
+    }
+
+    private fun refreshIndexSoon() {
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(2_500)
+            refreshIndex()
         }
     }
 
@@ -188,6 +232,18 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
 
     fun dismissError() {
         _chat.value = _chat.value.copy(error = null)
+    }
+
+    /** Switch the active session's model, then reload the catalog projection. */
+    fun selectModel(provider: String, model: String, reasoningEffort: String?) {
+        val sessionId = _chat.value.sessionId ?: return
+        viewModelScope.launch {
+            runCatching { repo.selectModel(sessionId, provider, model, reasoningEffort) }
+                .onSuccess { refreshCatalog() }
+                .onFailure { error ->
+                    _chat.value = _chat.value.copy(error = error.message ?: "切换模型失败")
+                }
+        }
     }
 
     private fun detach() {

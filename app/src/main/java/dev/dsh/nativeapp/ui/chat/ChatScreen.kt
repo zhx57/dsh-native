@@ -38,6 +38,7 @@ fun ChatScreen(
     modelLabel: String?,
     onSend: (String) -> Unit,
     onStop: () -> Unit,
+    onModelClick: () -> Unit,
     contentPadding: PaddingValues,
 ) {
     val colors = LocalDshColors.current
@@ -120,6 +121,7 @@ fun ChatScreen(
             onSend = onSend,
             onStop = onStop,
             modelLabel = modelLabel,
+            onModelClick = onModelClick,
             modifier = Modifier.padding(
                 start = DshSpacing.md.dp,
                 end = DshSpacing.md.dp,

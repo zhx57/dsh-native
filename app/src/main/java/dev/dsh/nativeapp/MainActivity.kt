@@ -112,6 +112,8 @@ private fun DshRoot(
             ?: ref.model
     }
 
+    var showModelPicker by remember { mutableStateOf(false) }
+
     ChatScaffold(
         state = chat,
         groups = groups,
@@ -121,5 +123,19 @@ private fun DshRoot(
         onOpenSettings = { showSettings = true },
         onSend = { vm.send(it) },
         onStop = { vm.stop() },
+        onModelClick = { showModelPicker = true },
     )
+
+    if (showModelPicker) {
+        dev.dsh.nativeapp.ui.chat.ModelPickerSheet(
+            catalog = catalog,
+            currentProvider = catalog?.default?.provider,
+            currentModel = catalog?.default?.model,
+            onDismiss = { showModelPicker = false },
+            onSelect = { provider, model, effort ->
+                showModelPicker = false
+                vm.selectModel(provider, model, effort)
+            },
+        )
+    }
 }
