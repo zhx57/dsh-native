@@ -101,7 +101,7 @@ class TimelineBuilder {
                 val kind = JsonText.string(reason?.get("kind"))
                 when (kind) {
                     "error" -> {
-                        val failure = reason["error"] as? JsonObject
+                        val failure = reason?.get("error") as? JsonObject
                         items.add(
                             TimelineItem.TurnOutcome(
                                 seq = seq,

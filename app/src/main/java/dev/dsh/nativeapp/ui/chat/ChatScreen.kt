@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.dsh.nativeapp.data.ChatUiState
 import dev.dsh.nativeapp.data.TimelineItem
+import dev.dsh.nativeapp.data.TurnOutcomeKind
 import dev.dsh.nativeapp.ui.theme.DshRadius
 import dev.dsh.nativeapp.ui.theme.DshSpacing
 import dev.dsh.nativeapp.ui.theme.LocalDshColors
@@ -349,7 +350,7 @@ private fun keyOf(item: TimelineItem): String = when (item) {
 @Composable
 private fun TurnOutcomeRow(item: TimelineItem.TurnOutcome) {
     val colors = LocalDshColors.current
-    val isError = item.kind == TimelineItem.TurnOutcomeKind.Error
+    val isError = item.kind == TurnOutcomeKind.Error
     val tint = if (isError) colors.stateError else colors.labelTertiary
 
     Column(
@@ -369,11 +370,11 @@ private fun TurnOutcomeRow(item: TimelineItem.TurnOutcome) {
             Spacer(Modifier.width(5.dp))
             Text(
                 text = when (item.kind) {
-                    TimelineItem.TurnOutcomeKind.Error -> "请求失败"
-                    TimelineItem.TurnOutcomeKind.Aborted -> "已停止"
-                    TimelineItem.TurnOutcomeKind.MaxTokens -> "达到输出上限"
-                    TimelineItem.TurnOutcomeKind.Interrupted -> "上一轮中断"
-                    TimelineItem.TurnOutcomeKind.Blocked -> "被拦截"
+                    TurnOutcomeKind.Error -> "请求失败"
+                    TurnOutcomeKind.Aborted -> "已停止"
+                    TurnOutcomeKind.MaxTokens -> "达到输出上限"
+                    TurnOutcomeKind.Interrupted -> "上一轮中断"
+                    TurnOutcomeKind.Blocked -> "被拦截"
                 },
                 fontSize = 11.5.sp,
                 fontWeight = FontWeight.Medium,
