@@ -59,6 +59,11 @@ fun ChatScaffold(
     onStop: () -> Unit,
     onModelClick: () -> Unit,
     onDismissError: () -> Unit,
+    onAllow: () -> Unit,
+    onReject: () -> Unit,
+    onRunCommand: (String) -> Unit,
+    draft: String,
+    onDraftChange: (String) -> Unit,
 ) {
     val colors = LocalDshColors.current
     var drawerOpen by remember { mutableStateOf(false) }
@@ -78,6 +83,11 @@ fun ChatScaffold(
                 onStop = onStop,
                 onModelClick = onModelClick,
                 onDismissError = onDismissError,
+                onAllow = onAllow,
+                onReject = onReject,
+                onRunCommand = onRunCommand,
+                draft = draft,
+                onDraftChange = onDraftChange,
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
             )
         }

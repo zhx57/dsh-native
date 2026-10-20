@@ -6,9 +6,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import java.util.UUID
 
@@ -148,6 +148,81 @@ class DshRepository(private val client: DshClient) {
                 ?: 0L
             loadPage(sessionId, cursor, maxMessages)
         }
+
+    // ------------------------------------------------------------- commands
+
+    /** List the slash commands this session's host offers. */
+    suspend fun listCommands(agentId: String): List<SlashCommand> = withContext(Dispatchers.IO) {
+        val value = client.call("commands/list", buildJsonObject { put("agentId", agentId) })
+        (value as? JsonArray ?: JsonArray(emptyList())).mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            val name = JsonText.string(obj["name"]) ?: return@mapNotNull null
+            SlashCommand(
+                name = name,
+                description = JsonText.string(obj["description"]).orEmpty(),
+                hint = JsonText.string(JsonText.field(obj["input"], "hint")),
+            )
+        }
+    }
+
+    /** Execute one slash command line such as `/compact`. */
+    suspend fun executeCommand(agentId: String, line: String) = withContext(Dispatchers.IO) {
+        client.call(
+            "commands/execute",
+            buildJsonObject {
+                put("agentId", agentId)
+                put("line", line)
+                put("submittedAttachments", buildJsonArray { })
+            },
+        )
+        Unit
+    }
+
+    // ------------------------------------------------------------- approval
+
+    /**
+     * Answer a pending approval.
+     *
+     * `allowed-once` / `rejected` are the outcomes the web approval panel sends;
+     * the request rides the user-question channel keyed by the tool call id.
+     */
+    suspend fun answerApproval(agentId: String, callId: String, allowed: Boolean) =
+        withContext(Dispatchers.IO) {
+            client.call(
+                "userQuestions/answer",
+                buildJsonObject {
+                    put("agentId", agentId)
+                    put("callId", callId)
+                    put(
+                        "answer",
+                        buildJsonObject {
+                            put(
+                                "answers",
+                                buildJsonArray {
+                                    add(
+                                        buildJsonObject {
+                                            put("id", callId)
+                                            put(
+                                                "selected",
+                                                buildJsonArray {
+                                                    add(
+                                                        JsonPrimitive(
+                                                            if (allowed) "allowed-once" else "rejected",
+                                                        ),
+                                                    )
+                                                },
+                                            )
+                                        },
+                                    )
+                                },
+                            )
+                        },
+                    )
+                },
+            )
+            Unit
+        }
+
 
     private fun parsePage(value: JsonElement): PageResult {
         val obj = value.jsonObject

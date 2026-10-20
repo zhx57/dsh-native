@@ -113,6 +113,7 @@ private fun DshRoot(
     }
 
     var showModelPicker by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf("") }
 
     ChatScaffold(
         state = chat,
@@ -125,6 +126,11 @@ private fun DshRoot(
         onStop = { vm.stop() },
         onModelClick = { showModelPicker = true },
         onDismissError = { vm.dismissError() },
+        onAllow = { vm.answerApproval(true) },
+        onReject = { vm.answerApproval(false) },
+        onRunCommand = { vm.runCommand(it) },
+        draft = draft,
+        onDraftChange = { draft = it },
     )
 
     if (showModelPicker) {

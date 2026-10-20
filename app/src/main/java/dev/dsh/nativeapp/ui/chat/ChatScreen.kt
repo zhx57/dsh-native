@@ -41,6 +41,11 @@ fun ChatScreen(
     onStop: () -> Unit,
     onModelClick: () -> Unit,
     onDismissError: () -> Unit,
+    onAllow: () -> Unit,
+    onReject: () -> Unit,
+    onRunCommand: (String) -> Unit,
+    draft: String,
+    onDraftChange: (String) -> Unit,
     contentPadding: PaddingValues,
 ) {
     val colors = LocalDshColors.current
@@ -130,6 +135,30 @@ fun ChatScreen(
             }
         }
 
+        if (state.pendingApproval != null) {
+            ApprovalCard(
+                toolName = state.pendingApproval.toolName,
+                reason = state.pendingApproval.reason,
+                detail = state.pendingApproval.detail,
+                onAllow = onAllow,
+                onReject = onReject,
+                modifier = Modifier.padding(
+                    horizontal = DshSpacing.md.dp,
+                    vertical = DshSpacing.xs.dp,
+                ),
+            )
+        }
+
+        if (state.todos.isNotEmpty()) {
+            TodoPanel(
+                todos = state.todos,
+                modifier = Modifier.padding(
+                    horizontal = DshSpacing.md.dp,
+                    vertical = DshSpacing.xs.dp,
+                ),
+            )
+        }
+
         Composer(
             enabled = state.sessionId != null,
             running = state.running,
@@ -137,6 +166,10 @@ fun ChatScreen(
             onStop = onStop,
             modelLabel = modelLabel,
             onModelClick = onModelClick,
+            draft = draft,
+            onDraftChange = onDraftChange,
+            commands = state.commands,
+            onSubmitCommand = onRunCommand,
             modifier = Modifier.padding(
                 start = DshSpacing.md.dp,
                 end = DshSpacing.md.dp,

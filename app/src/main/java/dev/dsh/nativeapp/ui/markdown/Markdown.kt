@@ -1,5 +1,8 @@
 package dev.dsh.nativeapp.ui.markdown
 
+/** Column alignment declared by the table separator row. */
+enum class MdAlign { Start, Center, End }
+
 /** One block of parsed markdown. */
 sealed interface MdBlock {
     data class Paragraph(val spans: List<MdSpan>) : MdBlock
@@ -8,7 +11,11 @@ sealed interface MdBlock {
     data class BulletList(val items: List<List<MdSpan>>) : MdBlock
     data class OrderedList(val start: Int, val items: List<List<MdSpan>>) : MdBlock
     data class Quote(val spans: List<MdSpan>) : MdBlock
-    data class Table(val header: List<String>, val rows: List<List<String>>) : MdBlock
+    data class Table(
+        val header: List<List<MdSpan>>,
+        val rows: List<List<List<MdSpan>>>,
+        val alignments: List<MdAlign> = emptyList(),
+    ) : MdBlock
     data object Rule : MdBlock
 }
 
@@ -80,14 +87,16 @@ object Markdown {
                 }
 
                 isTableHeader(lines, index) -> {
-                    val header = splitTableRow(lines[index])
+                    val header = splitTableRow(lines[index]).map { inline(it) }
+                    val aligns = parseAlignments(lines[index + 1])
                     index += 2
-                    val rows = mutableListOf<List<String>>()
-                    while (index < lines.size && lines[index].contains('|') && lines[index].isNotBlank()) {
-                        rows += splitTableRow(lines[index])
+                    val rows = mutableListOf<List<List<MdSpan>>>()
+                    while (index < lines.size && looksLikeTableRow(lines[index])) {
+                        val cells = splitTableRow(lines[index]).map { inline(it) }
+                        rows += cells
                         index++
                     }
-                    blocks += MdBlock.Table(header, rows)
+                    blocks += MdBlock.Table(header, rows, aligns)
                 }
 
                 BULLET.matches(line) -> {
@@ -142,12 +151,55 @@ object Markdown {
         if (index + 1 >= lines.size) return false
         if (!lines[index].contains('|')) return false
         val separator = lines[index + 1].trim()
-        return separator.isNotEmpty() && separator.all { it == '|' || it == '-' || it == ':' || it == ' ' } &&
-            separator.contains('-')
+        if (separator.isEmpty()) return false
+        if (!separator.contains('-')) return false
+        if (!separator.all { it == '|' || it == '-' || it == ':' || it == ' ' || it == '\t' }) return false
+        // A row of only pipes and dashes must still describe the header's columns.
+        return splitTableRow(lines[index]).size == splitTableRow(lines[index + 1]).size
     }
 
-    private fun splitTableRow(line: String): List<String> =
-        line.trim().trim('|').split('|').map { it.trim() }
+    /** A body row: piped text that is not a separator and not blank. */
+    private fun looksLikeTableRow(line: String): Boolean =
+        line.isNotBlank() && line.contains('|') && !line.trimStart().startsWith("```")
+
+    private fun parseAlignments(separator: String): List<MdAlign> =
+        splitTableRow(separator).map { cell ->
+            val trimmed = cell.trim()
+            when {
+                trimmed.startsWith(':') && trimmed.endsWith(':') -> MdAlign.Center
+                trimmed.endsWith(':') -> MdAlign.End
+                else -> MdAlign.Start
+            }
+        }
+
+    /** Split on unescaped pipes, keeping empty interior cells. */
+    private fun splitTableRow(line: String): List<String> {
+        val trimmed = line.trim().let {
+            if (it.startsWith("|")) it.substring(1) else it
+        }.let {
+            if (it.endsWith("|") && !it.endsWith("\\|")) it.dropLast(1) else it
+        }
+        val cells = mutableListOf<String>()
+        val current = StringBuilder()
+        var index = 0
+        while (index < trimmed.length) {
+            val char = trimmed[index]
+            if (char == '\\' && index + 1 < trimmed.length && trimmed[index + 1] == '|') {
+                current.append('|')
+                index += 2
+                continue
+            }
+            if (char == '|') {
+                cells += current.toString().trim()
+                current.clear()
+            } else {
+                current.append(char)
+            }
+            index++
+        }
+        cells += current.toString().trim()
+        return cells
+    }
 
     // ---------------------------------------------------------------- inline
 

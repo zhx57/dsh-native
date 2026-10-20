@@ -3,6 +3,8 @@ package dev.dsh.nativeapp.ui.markdown
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -170,41 +172,89 @@ private fun CodeBlock(block: MdBlock.Code, codeFontSize: Int) {
     }
 }
 
+/**
+ * Table sized to the transcript column.
+ *
+ * The web build renders tables in a scrollable box with intrinsic column widths;
+ * on a phone that pushes most columns off-screen. Here every column takes an equal
+ * share of the available width and wraps, so a four-column comparison stays
+ * readable without horizontal scrolling. Text that is still too wide (long paths,
+ * code identifiers) breaks instead of clipping.
+ */
 @Composable
 private fun TableBlock(block: MdBlock.Table) {
     val colors = LocalDshColors.current
+    val columnCount = maxOf(block.header.size, block.rows.maxOfOrNull { it.size } ?: 0)
+    if (columnCount == 0) return
+
     Column(
         Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .border(0.5.dp, colors.borderL2, RoundedCornerShape(DshRadius.md.dp)),
+            .border(0.5.dp, colors.borderL2, RoundedCornerShape(DshRadius.md.dp))
+            .clip(RoundedCornerShape(DshRadius.md.dp)),
     ) {
         Row(Modifier.background(colors.codeBlockBanner)) {
-            block.header.forEach { cell ->
-                Text(
-                    text = cell,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
+            repeat(columnCount) { column ->
+                val cell = block.header.getOrNull(column).orEmpty()
+                TableCell(
+                    spans = cell,
+                    weight = 1f,
+                    bold = true,
                     color = colors.labelPrimary,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                    align = block.alignments.getOrNull(column) ?: MdAlign.Start,
                 )
-                Spacer(Modifier.width(4.dp))
             }
         }
-        block.rows.forEach { row ->
-            Row(Modifier.background(colors.bgBase)) {
-                row.forEach { cell ->
-                    Text(
-                        text = cell,
-                        fontSize = 13.sp,
-                        color = colors.labelSecondary,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                    )
-                    Spacer(Modifier.width(4.dp))
+        block.rows.forEachIndexed { rowIndex, row ->
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .background(
+                        if (rowIndex % 2 == 1) colors.codeBlock.copy(alpha = 0.5f) else colors.bgBase,
+                    ),
+            ) {
+                Row(Modifier.fillMaxWidth()) {
+                    repeat(columnCount) { column ->
+                        val cell = row.getOrNull(column).orEmpty()
+                        TableCell(
+                            spans = cell,
+                            weight = 1f,
+                            bold = false,
+                            color = colors.labelSecondary,
+                            align = block.alignments.getOrNull(column) ?: MdAlign.Start,
+                        )
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.TableCell(
+    spans: List<MdSpan>,
+    weight: Float,
+    bold: Boolean,
+    color: androidx.compose.ui.graphics.Color,
+    align: MdAlign,
+) {
+    val textAlign = when (align) {
+        MdAlign.Start -> TextAlign.Start
+        MdAlign.Center -> TextAlign.Center
+        MdAlign.End -> TextAlign.End
+    }
+    Text(
+        text = spans.toAnnotated(),
+        fontSize = 12.5.sp,
+        lineHeight = 18.sp,
+        fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal,
+        color = color,
+        textAlign = textAlign,
+        softWrap = true,
+        modifier = Modifier
+            .weight(weight)
+            .padding(horizontal = 8.dp, vertical = 7.dp),
+    )
 }
 
 /** Build the styled string for one inline span run. */

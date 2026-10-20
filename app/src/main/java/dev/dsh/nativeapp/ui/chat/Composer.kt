@@ -23,6 +23,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,12 +56,33 @@ fun Composer(
     modifier: Modifier = Modifier,
     modelLabel: String? = null,
     onModelClick: () -> Unit = {},
+    draft: String = "",
+    onDraftChange: (String) -> Unit = {},
+    commands: List<dev.dsh.nativeapp.data.SlashCommand> = emptyList(),
+    onSubmitCommand: (String) -> Unit = {},
 ) {
     val colors = LocalDshColors.current
-    var text by remember { mutableStateOf("") }
+    var text by remember { mutableStateOf(draft) }
+    // Keep the field in sync when the caller rewrites the draft (command completion).
+    LaunchedEffect(draft) {
+        if (draft != text) text = draft
+    }
     val canSend = enabled && text.isNotBlank()
+    val commandQuery = awaitingCommand(text)
 
     Column(modifier = modifier.fillMaxWidth()) {
+        if (commandQuery != null && commands.isNotEmpty()) {
+            CommandSuggestions(
+                commands = commands,
+                query = commandQuery,
+                onPick = { command ->
+                    val completed = "/${command.name} "
+                    text = completed
+                    onDraftChange(completed)
+                },
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
+        }
         Column(
             Modifier
                 .fillMaxWidth()
@@ -70,7 +92,10 @@ fun Composer(
         ) {
             BasicTextField(
                 value = text,
-                onValueChange = { text = it },
+                onValueChange = {
+                    text = it
+                    onDraftChange(it)
+                },
                 enabled = enabled,
                 textStyle = TextStyle(fontSize = 15.sp, color = colors.labelPrimary, lineHeight = 22.sp),
                 cursorBrush = androidx.compose.ui.graphics.SolidColor(colors.labelPrimary),
@@ -143,8 +168,13 @@ fun Composer(
                         IconButton(
                             onClick = {
                                 if (canSend) {
-                                    onSend(text)
+                                    if (text.trimStart().startsWith("/")) {
+                                        onSubmitCommand(text.trim())
+                                    } else {
+                                        onSend(text)
+                                    }
                                     text = ""
+                                    onDraftChange("")
                                 }
                             },
                             enabled = canSend,

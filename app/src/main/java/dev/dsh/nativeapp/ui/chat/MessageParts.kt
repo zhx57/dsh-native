@@ -19,7 +19,12 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.Checklist
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -105,6 +110,8 @@ fun ToolCallCard(item: TimelineItem.ToolCallItem) {
     val colors = LocalDshColors.current
     var expanded by remember { mutableStateOf(false) }
     val summary = remember(item.arguments) { summarizeArguments(item.name, item.arguments) }
+    val output = remember(item.result) { classifyToolOutput(item.result) }
+    val resultPreview = remember(output) { previewOf(output) }
 
     Column(
         Modifier
@@ -124,26 +131,34 @@ fun ToolCallCard(item: TimelineItem.ToolCallItem) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                imageVector = Icons.Outlined.Terminal,
+                imageVector = iconFor(item.name),
                 contentDescription = null,
                 tint = colors.labelTertiary,
                 modifier = Modifier.size(16.dp),
             )
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    text = item.name,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = colors.labelPrimary,
-                )
-                if (summary.isNotBlank() && !expanded) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = summary,
+                        text = displayName(item.name),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = colors.labelPrimary,
+                    )
+                    if (output is ToolOutput.Diff && (output.added + output.removed) > 0) {
+                        Spacer(Modifier.width(6.dp))
+                        DiffStat(output.added, output.removed)
+                    }
+                }
+                val subtitle = summary.ifBlank { resultPreview }
+                if (subtitle.isNotBlank() && !expanded) {
+                    Text(
+                        text = subtitle,
                         fontSize = 12.sp,
                         color = colors.labelTertiary,
                         maxLines = 1,
-                        fontFamily = FontFamily.Monospace,
+                        overflow = TextOverflow.Ellipsis,
+                        fontFamily = if (summary.isBlank()) FontFamily.Default else FontFamily.Monospace,
                     )
                 }
             }
@@ -190,13 +205,7 @@ fun ToolCallCard(item: TimelineItem.ToolCallItem) {
                 }
                 if (!item.result.isNullOrBlank()) {
                     SectionLabel(if (item.isError) "错误" else "输出")
-                    Text(
-                        text = item.result,
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = if (item.isError) colors.stateError else colors.labelSecondary,
-                    )
+                    ToolOutputView(output)
                 }
             }
         }
@@ -212,6 +221,45 @@ private fun SectionLabel(text: String) {
         fontWeight = FontWeight.Medium,
         color = colors.labelTertiary,
     )
+}
+
+/** A short human-readable gist of a result, used when no argument digest exists. */
+private fun previewOf(output: ToolOutput): String = when (output) {
+    ToolOutput.Empty -> ""
+    is ToolOutput.Diff -> "改动 ${output.lines.size} 行"
+    is ToolOutput.Lines -> {
+        val first = output.lines.firstOrNull { it.text.isNotBlank() }?.text.orEmpty()
+        when {
+            output.lines.size == 1 -> first.take(110)
+            else -> "${output.lines.size} 行输出 · ${first.take(80)}"
+        }
+    }
+    is ToolOutput.Text -> output.body.lineSequence().firstOrNull().orEmpty().take(110)
+}
+
+/** Friendlier label for a tool id. */
+private fun displayName(name: String): String = when (name) {
+    "pwsh", "bash", "shell" -> "终端命令"
+    "read", "fs_read" -> "读取文件"
+    "write", "fs_write" -> "写入文件"
+    "edit", "str_replace_editor", "str-replace-editor" -> "编辑文件"
+    "grep", "fs_search", "search" -> "搜索内容"
+    "glob", "find" -> "查找文件"
+    "todo", "todo_write" -> "更新待办"
+    "web_search" -> "网页搜索"
+    "web_fetch" -> "抓取网页"
+    "present" -> "展示文件"
+    "task", "subagent" -> "子任务"
+    else -> name
+}
+
+private fun iconFor(name: String): androidx.compose.ui.graphics.vector.ImageVector = when (name) {
+    "read", "fs_read", "write", "fs_write", "edit", "str_replace_editor", "str-replace-editor" ->
+        Icons.Outlined.Description
+    "web_search", "web_fetch" -> Icons.Outlined.Language
+    "todo", "todo_write" -> Icons.Outlined.Checklist
+    "grep", "fs_search", "search", "glob", "find" -> Icons.Outlined.Search
+    else -> Icons.Outlined.Terminal
 }
 
 /** One-line argument digest shown while the card is collapsed. */

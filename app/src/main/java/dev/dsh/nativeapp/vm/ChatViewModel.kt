@@ -13,6 +13,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import dev.dsh.nativeapp.data.PendingApproval
+import dev.dsh.nativeapp.data.SlashCommand
+import dev.dsh.nativeapp.data.TodoItem
+import dev.dsh.nativeapp.data.TodoStatus
 import dev.dsh.nativeapp.data.WorkspaceSummary
 import kotlinx.serialization.json.JsonObject
 
@@ -135,6 +139,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
 
         activeBuilder = TimelineBuilder()
         _chat.value = ChatUiState(sessionId = sessionId, connecting = true)
+        loadCommands()
         val title = _sessions.value.firstOrNull { it.sessionId == sessionId }?.title.orEmpty()
 
         activeStream = streams.followSession(
@@ -143,6 +148,8 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                 activeBuilder.applyFollowValue(value)
                 val running = detectRunning(value)
                 val usage = detectUsage(value)
+                val projections = detectProjections(value)
+                val approval = detectApproval(value)
                 viewModelScope.launch {
                     _chat.value = _chat.value.copy(
                         timeline = activeBuilder.snapshot(),
@@ -150,6 +157,9 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                         connecting = false,
                         running = running ?: _chat.value.running,
                         tokenUsage = usage ?: _chat.value.tokenUsage,
+                        todos = projections?.first ?: _chat.value.todos,
+                        permissionPreset = projections?.second ?: _chat.value.permissionPreset,
+                        pendingApproval = approval ?: _chat.value.pendingApproval,
                     )
                 }
             },
@@ -186,6 +196,60 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         val projections = value["projections"] as? JsonObject ?: return null
         val values = projections["values"] as? JsonObject ?: return null
         return dev.dsh.nativeapp.data.TokenUsage.from(values["tokenUsage"])
+    }
+
+    /**
+     * Read the projections the chrome depends on: todos and the active
+     * permission preset. Both travel in the follow snapshot, so no extra RPC.
+     */
+    private fun detectProjections(value: JsonObject): Pair<List<TodoItem>, String?>? {
+        if (dev.dsh.nativeapp.data.JsonText.string(value["type"]) != "snapshot") return null
+        val projections = value["projections"] as? JsonObject ?: return null
+        val values = projections["values"] as? JsonObject ?: return null
+
+        val todos = (values["todos"] as? JsonObject)?.let { todoContainer ->
+            val items = todoContainer["items"] as? kotlinx.serialization.json.JsonArray
+                ?: todoContainer["todos"] as? kotlinx.serialization.json.JsonArray
+                ?: return@let null
+            items.mapNotNull { element ->
+                val obj = element as? JsonObject ?: return@mapNotNull null
+                val content = dev.dsh.nativeapp.data.JsonText.string(obj["content"]) ?: return@mapNotNull null
+                val status = when (dev.dsh.nativeapp.data.JsonText.string(obj["status"])) {
+                    "in_progress" -> TodoStatus.InProgress
+                    "completed", "done" -> TodoStatus.Completed
+                    else -> TodoStatus.Pending
+                }
+                TodoItemOf(content, status)
+            }
+        }.orEmpty()
+
+        val preset = (values["permissions"] as? JsonObject)
+            ?.let { dev.dsh.nativeapp.data.JsonText.string(it["currentValue"]) }
+        return todos to preset
+    }
+
+    private fun TodoItemOf(content: String, status: TodoStatus): TodoItem = TodoItem(content, status)
+
+    /** Detect an approval request carried by a live event. */
+    private fun detectApproval(value: JsonObject): PendingApproval? {
+        if (dev.dsh.nativeapp.data.JsonText.string(value["type"]) != "event") return null
+        val event = value["event"] as? JsonObject ?: return null
+        val eventType = dev.dsh.nativeapp.data.JsonText.string(event["type"]) ?: return null
+        if (eventType != "user-questions/request" && eventType != "approval/asked") return null
+        val data = event["data"] as? JsonObject ?: return null
+        val request = data["request"] as? JsonObject ?: data
+        val callId = dev.dsh.nativeapp.data.JsonText.string(request["callId"])
+            ?: dev.dsh.nativeapp.data.JsonText.string(request["id"])
+            ?: return null
+        val toolName = dev.dsh.nativeapp.data.JsonText.string(request["toolName"])
+            ?: dev.dsh.nativeapp.data.JsonText.string(request["tool"])
+            ?: "工具调用"
+        val reason = dev.dsh.nativeapp.data.JsonText.string(request["reason"])
+            ?: dev.dsh.nativeapp.data.JsonText.string(request["title"])
+            ?: "这个操作需要你确认"
+        val detail = dev.dsh.nativeapp.data.JsonText.string(request["detail"])
+            ?: dev.dsh.nativeapp.data.JsonText.string(request["command"])
+        return PendingApproval(callId, toolName, reason, detail)
     }
 
     /**
@@ -254,6 +318,45 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                 .onSuccess { refreshCatalog() }
                 .onFailure { error ->
                     _chat.value = _chat.value.copy(error = describe(error, "切换模型失败"))
+                }
+        }
+    }
+
+    /** Load the slash commands offered for the active session. */
+    fun loadCommands() {
+        val sessionId = _chat.value.sessionId ?: return
+        viewModelScope.launch {
+            runCatching { repo.listCommands(sessionId) }
+                .onSuccess { _chat.value = _chat.value.copy(commands = it) }
+        }
+    }
+
+    /** Run a slash command line. */
+    fun runCommand(line: String) {
+        val sessionId = _chat.value.sessionId ?: return
+        val trimmed = line.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch {
+            runCatching { repo.executeCommand(sessionId, trimmed) }
+                .onFailure { error ->
+                    _chat.value = _chat.value.copy(error = describe(error, "命令执行失败"))
+                }
+        }
+    }
+
+    /** Approve or reject the pending tool call. */
+    fun answerApproval(allowed: Boolean) {
+        val sessionId = _chat.value.sessionId ?: return
+        val pending = _chat.value.pendingApproval ?: return
+        // Clear optimistically so the card cannot be double-submitted.
+        _chat.value = _chat.value.copy(pendingApproval = null)
+        viewModelScope.launch {
+            runCatching { repo.answerApproval(sessionId, pending.callId, allowed) }
+                .onFailure { error ->
+                    _chat.value = _chat.value.copy(
+                        pendingApproval = pending,
+                        error = describe(error, "提交确认失败"),
+                    )
                 }
         }
     }
