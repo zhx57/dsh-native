@@ -119,6 +119,10 @@ fun ChatScreen(
                         is TimelineItem.UserMessage -> UserTurn(item)
                         is TimelineItem.AssistantMessage -> AssistantTurn(item)
                         is TimelineItem.ToolCallItem -> ToolCallCard(item)
+                        is TimelineItem.PendingQuestionItem -> QuestionCard(
+                            batch = item,
+                            onSubmit = { answers -> onAnswerQuestions(item.callId, answers) },
+                        )
                         is TimelineItem.TurnDivider -> TurnDivider(item.turn)
                         is TimelineItem.Notice -> Text(
                             text = item.text,
@@ -129,26 +133,31 @@ fun ChatScreen(
                 }
             }
 
+            val anchors = remember(state.timeline) { messageAnchors(state.timeline) }
+            val firstVisible = listState.firstVisibleItemIndex
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: firstVisible
+
             TranscriptNavigator(
-                canScrollUp = state.timeline.isNotEmpty(),
-                canScrollDown = !followTail,
+                canGoUp = anchorBefore(anchors, firstVisible) != null,
+                canGoDown = anchorAfter(anchors, lastVisible) != null,
+                showJumpToLatest = !followTail && anchors.isNotEmpty(),
                 onPrevious = {
-                    scope.launch {
-                        val target = previousMessageIndex(listState, state.timeline)
-                        if (target >= 0) listState.animateScrollToItem(target)
+                    anchorBefore(anchors, listState.firstVisibleItemIndex)?.let { target ->
+                        scope.launch { listState.animateScrollToItem(target) }
                     }
                 },
                 onNext = {
-                    scope.launch {
-                        val target = nextMessageIndex(listState, state.timeline)
-                        if (target >= 0) listState.animateScrollToItem(target)
+                    val bottom = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index
+                        ?: listState.firstVisibleItemIndex
+                    anchorAfter(anchors, bottom)?.let { target ->
+                        scope.launch { listState.animateScrollToItem(target) }
                     }
                 },
                 onJumpToLatest = {
-                    scope.launch {
-                        followTail = true
-                        if (state.timeline.isNotEmpty()) {
-                            listState.animateScrollToItem(state.timeline.lastIndex)
+                    lastAnchor(anchors)?.let { target ->
+                        scope.launch {
+                            followTail = true
+                            listState.animateScrollToItem(target)
                         }
                     }
                 },
@@ -184,19 +193,6 @@ fun ChatScreen(
                     modifier = Modifier
                         .clickable(onClick = onDismissError)
                         .padding(start = 10.dp, top = 2.dp, bottom = 2.dp),
-                )
-            }
-        }
-
-        if (state.questions.isNotEmpty()) {
-            state.questions.forEach { batch ->
-                QuestionCard(
-                    batch = batch,
-                    onSubmit = { answers -> onAnswerQuestions(batch.callId, answers) },
-                    modifier = Modifier.padding(
-                        horizontal = DshSpacing.md.dp,
-                        vertical = DshSpacing.xs.dp,
-                    ),
                 )
             }
         }
@@ -316,24 +312,7 @@ private fun keyOf(item: TimelineItem): String = when (item) {
     is TimelineItem.ToolCallItem -> "t-${item.callId}"
     is TimelineItem.TurnDivider -> "d-${item.turn}"
     is TimelineItem.Notice -> "n-${item.seq}"
+    is TimelineItem.PendingQuestionItem -> "q-${item.callId}"
 }
 
 /** Index of the message above the current viewport, or -1 at the top. */
-private fun previousMessageIndex(
-    listState: LazyListState,
-    timeline: List<TimelineItem>,
-): Int {
-    val first = listState.firstVisibleItemIndex
-    return (first - 1).coerceAtLeast(0).takeIf { first > 0 && timeline.isNotEmpty() } ?: -1
-}
-
-/** Index of the message below the viewport, or -1 when already at the tail. */
-private fun nextMessageIndex(
-    listState: LazyListState,
-    timeline: List<TimelineItem>,
-): Int {
-    if (timeline.isEmpty()) return -1
-    val visible = listState.layoutInfo.visibleItemsInfo
-    val last = visible.lastOrNull()?.index ?: return -1
-    return (last + 1).takeIf { it <= timeline.lastIndex } ?: -1
-}

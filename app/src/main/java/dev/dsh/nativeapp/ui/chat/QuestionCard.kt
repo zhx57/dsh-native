@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -29,30 +28,27 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.dsh.nativeapp.data.PendingQuestion
-import dev.dsh.nativeapp.data.QuestionItem
+import dev.dsh.nativeapp.data.QuestionPrompt
+import dev.dsh.nativeapp.data.TimelineItem
 import dev.dsh.nativeapp.ui.theme.DshRadius
 import dev.dsh.nativeapp.ui.theme.DshSpacing
 import dev.dsh.nativeapp.ui.theme.LocalDshColors
 
 /**
- * `ask_user_question` batch, rendered as selectable options.
+ * Pending `ask_user_question` batch.
  *
- * The answers live in the host's `userQuestions` projection rather than the event
- * stream, which is why this tool previously appeared to do nothing. Selection is
- * local until submitted so a multi-question batch can be filled in before the
- * model is resumed.
+ * The answer travels as `userQuestions/answer` with the tool call id, which is the
+ * same channel the web approval flow uses. Selection stays local until 提交 so a
+ * multi-question batch can be filled in before the model is resumed.
  */
 @Composable
 fun QuestionCard(
-    batch: PendingQuestion,
+    batch: TimelineItem.PendingQuestionItem,
     onSubmit: (Map<String, List<String>>) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalDshColors.current
-    val chosen = remember(batch.callId) {
-        mutableStateOf<Map<String, List<String>>>(emptyMap())
-    }
+    var chosen by remember(batch.callId) { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
 
     Column(
         modifier
@@ -81,33 +77,30 @@ fun QuestionCard(
             batch.questions.forEach { question ->
                 QuestionBlock(
                     question = question,
-                    selected = chosen.value[question.id].orEmpty(),
+                    selected = chosen[question.id].orEmpty(),
                     multiSelect = question.multiSelect,
                     onToggle = { label ->
-                        val current = chosen.value[question.id].orEmpty()
+                        val current = chosen[question.id].orEmpty()
                         val next = when {
                             question.multiSelect ->
                                 if (label in current) current - label else current + label
                             label in current -> emptyList()
                             else -> listOf(label)
                         }
-                        chosen.value = chosen.value + (question.id to next)
+                        chosen = chosen + (question.id to next)
                     },
                 )
             }
 
-            val complete = batch.questions.all { chosen.value[it.id].orEmpty().isNotEmpty() }
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-            ) {
+            val complete = batch.questions.all { chosen[it.id].orEmpty().isNotEmpty() }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 Text(
                     text = "提交",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                     color = if (complete) colors.buttonPrimaryForeground else colors.labelCaption,
                     modifier = Modifier
-                        .clickable(enabled = complete) { onSubmit(chosen.value) }
+                        .clickable(enabled = complete) { onSubmit(chosen) }
                         .background(
                             if (complete) colors.buttonPrimaryFill else colors.bgSkeleton,
                             RoundedCornerShape(DshRadius.full.dp),
@@ -121,7 +114,7 @@ fun QuestionCard(
 
 @Composable
 private fun QuestionBlock(
-    question: QuestionItem,
+    question: QuestionPrompt,
     selected: List<String>,
     multiSelect: Boolean,
     onToggle: (String) -> Unit,
@@ -129,11 +122,7 @@ private fun QuestionBlock(
     val colors = LocalDshColors.current
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (question.header != null) {
-            Text(
-                text = question.header,
-                fontSize = 11.sp,
-                color = colors.labelCaption,
-            )
+            Text(text = question.header, fontSize = 11.sp, color = colors.labelCaption)
         }
         Text(
             text = question.question,
@@ -141,16 +130,9 @@ private fun QuestionBlock(
             lineHeight = 20.sp,
             color = colors.labelPrimary,
         )
-        if (question.detail != null) {
-            Text(
-                text = question.detail,
-                fontSize = 11.5.sp,
-                lineHeight = 17.sp,
-                color = colors.labelTertiary,
-            )
-        }
         question.options.forEach { option ->
             val isOn = option.label in selected
+            val shape = RoundedCornerShape(if (multiSelect) 4.dp else DshRadius.full.dp)
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -159,20 +141,15 @@ private fun QuestionBlock(
                         RoundedCornerShape(DshRadius.md.dp),
                     )
                     .clickable { onToggle(option.label) }
-                    .padding(horizontal = 10.dp, vertical = 9.dp),
+                    .padding(horizontal = 9.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(
                     Modifier
                         .size(15.dp)
-                        .border(
-                            width = if (isOn) 0.dp else 1.dp,
-                            color = colors.borderL4,
-                            shape = RoundedCornerShape(if (multiSelect) 4.dp else DshRadius.full.dp),
-                        )
-                        .background(
-                            if (isOn) colors.buttonPrimaryFill else Color.Transparent,
-                            RoundedCornerShape(if (multiSelect) 4.dp else DshRadius.full.dp),
+                        .then(
+                            if (isOn) Modifier.background(colors.buttonPrimaryFill, shape)
+                            else Modifier.border(1.dp, colors.borderL4, shape),
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -186,22 +163,17 @@ private fun QuestionBlock(
                     }
                 }
                 Spacer(Modifier.width(9.dp))
-                Column {
+                Column(Modifier.weight(1f)) {
                     Text(
                         text = option.label,
                         fontSize = 13.sp,
                         color = if (isOn) colors.labelPrimary else colors.labelSecondary,
                     )
                     if (option.description != null) {
-                        Text(
-                            text = option.description,
-                            fontSize = 11.sp,
-                            color = colors.labelCaption,
-                        )
+                        Text(text = option.description, fontSize = 11.sp, color = colors.labelCaption)
                     }
                 }
             }
         }
     }
 }
-

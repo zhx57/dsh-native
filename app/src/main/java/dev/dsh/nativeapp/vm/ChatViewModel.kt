@@ -327,14 +327,17 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
     }
 
     /**
-     * Read the `userQuestions` projection.
+     * The host's `userQuestions` projection, kept as a secondary signal.
      *
-     * `ask_user_question` batches never arrive as stream events; the host keeps
-     * them in this projection, which is why the tool previously looked like a
-     * no-op in the app.
+     * It only contains a batch when the tool schema declares a timed `timeout`
+     * parameter; this deployment's `ask_user_question` has none, so the pending
+     * question is recovered from the `tool/call` event instead (see
+     * `TimelineBuilder`). Reading the projection stays here so an upgraded host
+     * starts working without a client change.
      */
     private fun parseQuestions(container: JsonObject?): List<PendingQuestion> {
-        val active = container?.get("active") as? kotlinx.serialization.json.JsonArray ?: return emptyList()
+        val active = container?.get("active") as? kotlinx.serialization.json.JsonArray
+            ?: return emptyList()
         return active.mapNotNull { element ->
             val batch = element as? JsonObject ?: return@mapNotNull null
             val callId = dev.dsh.nativeapp.data.JsonText.string(batch["callId"]) ?: return@mapNotNull null
@@ -342,18 +345,25 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                 .mapNotNull { raw ->
                     val q = raw as? JsonObject ?: return@mapNotNull null
                     val id = dev.dsh.nativeapp.data.JsonText.string(q["id"]) ?: return@mapNotNull null
+                    val text = dev.dsh.nativeapp.data.JsonText.string(q["question"]) ?: return@mapNotNull null
                     QuestionItem(
                         id = id,
-                        question = dev.dsh.nativeapp.data.JsonText.string(q["question"]) ?: return@mapNotNull null,
+                        question = text,
                         detail = dev.dsh.nativeapp.data.JsonText.string(q["detail"]),
                         header = dev.dsh.nativeapp.data.JsonText.string(q["header"]),
                         options = (q["options"] as? kotlinx.serialization.json.JsonArray).orEmpty()
                             .mapNotNull { opt ->
                                 val o = opt as? JsonObject ?: return@mapNotNull null
-                                val label = dev.dsh.nativeapp.data.JsonText.string(o["label"]) ?: return@mapNotNull null
+                                val label = dev.dsh.nativeapp.data.JsonText.string(o["label"])
+                                    ?: return@mapNotNull null
                                 QuestionOption(label, dev.dsh.nativeapp.data.JsonText.string(o["description"]))
                             },
-                        multiSelect = dev.dsh.nativeapp.data.JsonText.bool(q["multiSelect"]) ?: false,
+                        // The projection uses camelCase; the tool's own arguments use
+                        // `multi_select`. Accept either so a shape change cannot hide
+                        // the question.
+                        multiSelect = dev.dsh.nativeapp.data.JsonText.bool(q["multiSelect"])
+                            ?: dev.dsh.nativeapp.data.JsonText.bool(q["multi_select"])
+                            ?: false,
                     )
                 }
             if (questions.isEmpty()) null else PendingQuestion(callId, questions)

@@ -160,6 +160,20 @@ class TimelineBuilder {
         val callId = JsonText.string(data["callId"]) ?: return
         val name = JsonText.string(data["name"]) ?: "tool"
         val args = JsonText.string(data["arguments"]) ?: ""
+
+        // `ask_user_question` blocks until answered and the host's projection for it
+        // is empty on this deployment, so the pending question is recovered here.
+        if (name == "ask_user_question") {
+            val prompts = parseQuestionPrompts(args)
+            if (prompts.isNotEmpty()) {
+                if (!toolIndex.containsKey(callId)) {
+                    toolIndex[callId] = items.size
+                    items.add(TimelineItem.PendingQuestionItem(seq, time, callId, prompts))
+                }
+                return
+            }
+        }
+
         // The same call arrives twice: once inside the assistant message's content
         // and once as a standalone tool/call event. Keep whichever lands first and
         // only backfill arguments the other one lacked.
@@ -175,9 +189,44 @@ class TimelineBuilder {
         items.add(TimelineItem.ToolCallItem(seq, time, callId, name, args))
     }
 
+    /** Decode the `questions` array from an `ask_user_question` argument string. */
+    private fun parseQuestionPrompts(arguments: String): List<QuestionPrompt> {
+        val root = runCatching {
+            kotlinx.serialization.json.Json.parseToJsonElement(arguments) as? JsonObject
+        }.getOrNull() ?: return emptyList()
+        val array = root["questions"] as? JsonArray ?: return emptyList()
+        return array.mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            val id = JsonText.string(obj["id"]) ?: return@mapNotNull null
+            val text = JsonText.string(obj["question"]) ?: return@mapNotNull null
+            QuestionPrompt(
+                id = id,
+                question = text,
+                header = JsonText.string(obj["header"]),
+                options = (obj["options"] as? JsonArray).orEmpty().mapNotNull { raw ->
+                    val opt = raw as? JsonObject ?: return@mapNotNull null
+                    val label = JsonText.string(opt["label"]) ?: return@mapNotNull null
+                    QuestionChoice(label, JsonText.string(opt["description"]))
+                },
+                multiSelect = JsonText.bool(obj["multiSelect"])
+                    ?: JsonText.bool(obj["multi_select"])
+                    ?: false,
+            )
+        }
+    }
+
     private fun applyToolResult(seq: Long, time: Long, data: JsonObject) {
         val message = data["message"] as? JsonObject ?: return
         val callId = JsonText.string(message["toolCallId"]) ?: return
+
+        // A question that has been answered is replaced by its outcome row.
+        val pendingIndex = toolIndex[callId]
+        if (pendingIndex != null && items.getOrNull(pendingIndex) is TimelineItem.PendingQuestionItem) {
+            items.removeAt(pendingIndex)
+            toolIndex.remove(callId)
+            toolIndex.replaceAll { _, value -> if (value > pendingIndex) value - 1 else value }
+        }
+
         val text = EventParser.textOf(message["content"])
         val isError = JsonText.bool(message["isError"]) ?: false
         val index = toolIndex[callId]

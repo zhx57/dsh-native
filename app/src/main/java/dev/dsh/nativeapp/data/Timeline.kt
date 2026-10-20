@@ -59,7 +59,34 @@ sealed interface TimelineItem {
         override val time: Long,
         val turn: Int,
     ) : TimelineItem
+
+    /**
+     * An `ask_user_question` call blocked waiting for an answer.
+     *
+     * The host only publishes an `active` batch in the `userQuestions` projection
+     * when the tool declares a timed `timeout` parameter; this deployment's schema
+     * has none, so that projection stays empty even while the call is pending. The
+     * `tool/call` event carries the same payload, so the question is recovered from
+     * it and cleared once its `tool/result` arrives.
+     */
+    data class PendingQuestionItem(
+        override val seq: Long,
+        override val time: Long,
+        val callId: String,
+        val questions: List<QuestionPrompt>,
+    ) : TimelineItem
 }
+
+/** One question inside a pending `ask_user_question` call. */
+data class QuestionPrompt(
+    val id: String,
+    val question: String,
+    val header: String? = null,
+    val options: List<QuestionChoice> = emptyList(),
+    val multiSelect: Boolean = false,
+)
+
+data class QuestionChoice(val label: String, val description: String? = null)
 
 /** Parses raw DSH session events into timeline items. */
 object EventParser {

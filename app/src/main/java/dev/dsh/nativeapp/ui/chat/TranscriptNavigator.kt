@@ -20,17 +20,18 @@ import dev.dsh.nativeapp.ui.theme.DshRadius
 import dev.dsh.nativeapp.ui.theme.LocalDshColors
 
 /**
- * Floating transcript navigator, matching the reference app.
+ * Floating transcript navigator.
  *
- * Up jumps to the previous message, down to the next one, and the double-arrow
- * goes straight to the newest message. It is the only way back to the tail once
- * auto-follow has been released by scrolling up, and it gives a reliable way to
- * step through a long conversation without swipe precision.
+ * Up and down step between *messages* (a user turn or an assistant turn), not
+ * between list rows: one turn spans dozens of tool-call rows, so row-stepping made
+ * a single tap look like it did nothing but scroll a few pixels. The double arrow
+ * returns to the newest message.
  */
 @Composable
 fun TranscriptNavigator(
-    canScrollUp: Boolean,
-    canScrollDown: Boolean,
+    canGoUp: Boolean,
+    canGoDown: Boolean,
+    showJumpToLatest: Boolean,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onJumpToLatest: () -> Unit,
@@ -41,70 +42,61 @@ fun TranscriptNavigator(
     Column(
         modifier
             .background(colors.bgLayer1.copy(alpha = 0.92f), RoundedCornerShape(DshRadius.full.dp))
-            .padding(horizontal = 2.dp, vertical = 4.dp),
+            .padding(horizontal = 2.dp, vertical = 3.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+        verticalArrangement = Arrangement.spacedBy(1.dp),
     ) {
-        NavArrow(
-            up = true,
-            enabled = canScrollUp,
-            onClick = onPrevious,
-        )
-        // The double chevron appears only when the operator is away from the tail,
-        // so it does not compete with the single-arrow affordance.
-        if (canScrollDown) {
-            NavArrow(
-                up = false,
-                enabled = true,
-                double = true,
-                onClick = onJumpToLatest,
-            )
+        NavArrow(up = true, enabled = canGoUp, onClick = onPrevious)
+        if (showJumpToLatest) {
+            JumpArrow(enabled = true, onClick = onJumpToLatest)
         }
-        NavArrow(
-            up = false,
-            enabled = canScrollDown,
-            onClick = onNext,
-        )
+        NavArrow(up = false, enabled = canGoDown, onClick = onNext)
     }
 }
 
 @Composable
-private fun NavArrow(
-    up: Boolean,
-    enabled: Boolean,
-    double: Boolean = false,
-    onClick: () -> Unit,
-) {
+private fun NavArrow(up: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val colors = LocalDshColors.current
-    val tint = if (enabled) colors.labelSecondary else colors.labelCaption.copy(alpha = 0.4f)
+    val tint = if (enabled) colors.labelSecondary else colors.labelCaption.copy(alpha = 0.35f)
     Box(
         Modifier
-            .size(28.dp)
+            .size(26.dp)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = if (up) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+            contentDescription = if (up) "上一条消息" else "下一条消息",
+            tint = tint,
+            modifier = Modifier.size(19.dp),
+        )
+    }
+}
+
+/** Double chevron: jump straight to the newest message. */
+@Composable
+private fun JumpArrow(enabled: Boolean, onClick: () -> Unit) {
+    val colors = LocalDshColors.current
+    val tint = if (enabled) colors.labelSecondary else colors.labelCaption.copy(alpha = 0.35f)
+    Box(
+        Modifier
+            .size(26.dp)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            if (double) {
-                Icon(
-                    imageVector = Icons.Filled.KeyboardArrowUp,
-                    contentDescription = "跳到最新",
-                    tint = tint,
-                    modifier = Modifier.size(16.dp),
-                )
-                Icon(
-                    imageVector = Icons.Filled.KeyboardArrowDown,
-                    contentDescription = null,
-                    tint = tint,
-                    modifier = Modifier.size(16.dp),
-                )
-            } else {
-                Icon(
-                    imageVector = if (up) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                    contentDescription = if (up) "上一条" else "下一条",
-                    tint = tint,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
+            Icon(
+                imageVector = Icons.Filled.KeyboardArrowUp,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(13.dp),
+            )
+            Icon(
+                imageVector = Icons.Filled.KeyboardArrowDown,
+                contentDescription = "跳到最新消息",
+                tint = tint,
+                modifier = Modifier.size(13.dp),
+            )
         }
     }
 }
