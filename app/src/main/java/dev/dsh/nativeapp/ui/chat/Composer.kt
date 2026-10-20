@@ -60,6 +60,8 @@ fun Composer(
     onDraftChange: (String) -> Unit = {},
     commands: List<dev.dsh.nativeapp.data.SlashCommand> = emptyList(),
     onSubmitCommand: (String) -> Unit = {},
+    permissionPreset: String? = null,
+    onPermissionClick: () -> Unit = {},
 ) {
     val colors = LocalDshColors.current
     var text by remember { mutableStateOf(draft) }
@@ -126,7 +128,6 @@ fun Composer(
             Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 if (modelLabel != null) {
                     Row(
@@ -142,9 +143,10 @@ fun Composer(
                             color = colors.labelSecondary,
                         )
                     }
-                } else {
-                    Spacer(Modifier.width(1.dp))
+                    Spacer(Modifier.width(6.dp))
                 }
+                PermissionChip(preset = permissionPreset, onClick = onPermissionClick)
+                Spacer(Modifier.weight(1f))
 
                 if (running) {
                     IconButton(onClick = onStop, modifier = Modifier.size(38.dp)) {

@@ -179,7 +179,58 @@ class DshRepository(private val client: DshClient) {
         Unit
     }
 
-    // ------------------------------------------------------------- approval
+    /**
+     * Branch the session from one message.
+     *
+     * `session/fork` copies the log up to `atSeq` into a new session, which is the
+     * web UI's per-message "branch" action — a new conversation that keeps the
+     * history above that point and drops everything after it.
+     */
+    suspend fun forkSession(sessionId: String, atSeq: Long): String = withContext(Dispatchers.IO) {
+        val value = client.call(
+            "session/fork",
+            buildJsonObject {
+                put("request", buildJsonObject {
+                    put("sessionId", sessionId)
+                    put("atSeq", atSeq)
+                })
+            },
+        )
+        JsonText.string(value.jsonObject["sessionId"]) ?: error("session/fork returned no id")
+    }
+
+    /** Switch the permission preset (sandbox mode plus approval policy). */
+    suspend fun setPermissionPreset(agentId: String, preset: String) = withContext(Dispatchers.IO) {
+        client.call(
+            "commands/execute",
+            buildJsonObject {
+                put("agentId", agentId)
+                put("line", "/permission $preset")
+                put("submittedAttachments", buildJsonArray { })
+            },
+        )
+        Unit
+    }
+
+    /** Available permission presets with their defaults. */
+    suspend fun permissionCatalog(): PermissionCatalog = withContext(Dispatchers.IO) {
+        val value = client.call("permissionPresets/catalog", buildJsonObject { })
+        val obj = value.jsonObject
+        fun parse(key: String): List<String> =
+            (obj[key] as? JsonArray)?.mapNotNull { element ->
+                JsonText.string(JsonText.field(element, "value"))
+            } ?: emptyList()
+        PermissionCatalog(
+            options = parse("options"),
+            defaultPreset = JsonText.string(obj["defaultPreset"]),
+        )
+    }
+
+    data class PermissionCatalog(
+        val options: List<String>,
+        val defaultPreset: String?,
+    )
+
 
     /**
      * Answer a pending approval.

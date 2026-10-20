@@ -46,6 +46,8 @@ fun ChatScreen(
     onRunCommand: (String) -> Unit,
     draft: String,
     onDraftChange: (String) -> Unit,
+    onBranch: (Long) -> Unit,
+    onPermissionClick: () -> Unit,
     contentPadding: PaddingValues,
 ) {
     val colors = LocalDshColors.current
@@ -91,8 +93,8 @@ fun ChatScreen(
             ) {
                 items(items = state.timeline, key = { keyOf(it) }) { item ->
                     when (item) {
-                        is TimelineItem.UserMessage -> UserTurn(item)
-                        is TimelineItem.AssistantMessage -> AssistantTurn(item)
+                        is TimelineItem.UserMessage -> UserTurn(item, onLongPress = { onBranch(it.seq) })
+                        is TimelineItem.AssistantMessage -> AssistantTurn(item, onLongPress = { onBranch(it.seq) })
                         is TimelineItem.ToolCallItem -> ToolCallCard(item)
                         is TimelineItem.TurnDivider -> TurnDivider(item.turn)
                         is TimelineItem.Notice -> Text(
@@ -170,6 +172,8 @@ fun ChatScreen(
             onDraftChange = onDraftChange,
             commands = state.commands,
             onSubmitCommand = onRunCommand,
+            permissionPreset = state.permissionPreset,
+            onPermissionClick = onPermissionClick,
             modifier = Modifier.padding(
                 start = DshSpacing.md.dp,
                 end = DshSpacing.md.dp,

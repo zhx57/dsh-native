@@ -1,6 +1,7 @@
 package dev.dsh.nativeapp.ui.chat
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,7 +36,10 @@ import dev.dsh.nativeapp.ui.theme.LocalDshColors
 
 /** Operator turn: right-aligned bubble, matching the web transcript. */
 @Composable
-fun UserTurn(item: TimelineItem.UserMessage) {
+fun UserTurn(
+    item: TimelineItem.UserMessage,
+    onLongPress: (TimelineItem.UserMessage) -> Unit = {},
+) {
     val colors = LocalDshColors.current
     val text = item.blocks.filterIsInstance<ContentBlock.Text>().joinToString("\n") { it.text }
     val bubbleWidth = LocalConfiguration.current.screenWidthDp.dp * 0.82f
@@ -48,6 +52,10 @@ fun UserTurn(item: TimelineItem.UserMessage) {
             Modifier
                 .widthIn(max = bubbleWidth)
                 .background(colors.bubble, RoundedCornerShape(DshRadius.xl.dp))
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = { onLongPress(item) },
+                )
                 .padding(horizontal = DshSpacing.lg.dp, vertical = DshSpacing.md.dp),
         ) {
             Text(
@@ -62,13 +70,24 @@ fun UserTurn(item: TimelineItem.UserMessage) {
 
 /** Assistant turn: full-width content with reasoning, text and an action row. */
 @Composable
-fun AssistantTurn(item: TimelineItem.AssistantMessage) {
+fun AssistantTurn(
+    item: TimelineItem.AssistantMessage,
+    onLongPress: (TimelineItem.AssistantMessage) -> Unit = {},
+) {
     val colors = LocalDshColors.current
     val clipboard = LocalClipboardManager.current
     val textBlocks = item.blocks.filterIsInstance<ContentBlock.Text>()
     val reasoning = item.blocks.filterIsInstance<ContentBlock.Reasoning>().joinToString("\n\n") { it.text }
 
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = {},
+                onLongClick = { onLongPress(item) },
+            ),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
         if (reasoning.isNotBlank()) {
             ReasoningBlock(reasoning, item.streaming)
         }

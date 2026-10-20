@@ -49,6 +49,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         refreshIndex()
         refreshCatalog()
         followWorkspaces()
+        loadPermissionOptions()
     }
 
     // -------------------------------------------------------------- index
@@ -434,6 +435,50 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                 }
         }
     }
+
+    /**
+     * Branch from one message: keep the history up to `atSeq` in a new session and
+     * drop everything after it, then open the new session.
+     */
+    fun branchFrom(seq: Long) {
+        val sessionId = _chat.value.sessionId ?: return
+        viewModelScope.launch {
+            runCatching { repo.forkSession(sessionId, seq) }
+                .onSuccess { childId ->
+                    refreshIndex()
+                    openSession(childId)
+                }
+                .onFailure { error ->
+                    _chat.value = _chat.value.copy(error = describe(error, "分支失败"))
+                }
+        }
+    }
+
+    /** Switch the permission preset for this session. */
+    fun setPermission(preset: String) {
+        val sessionId = _chat.value.sessionId ?: return
+        viewModelScope.launch {
+            runCatching { repo.setPermissionPreset(sessionId, preset) }
+                .onSuccess {
+                    _chat.value = _chat.value.copy(permissionPreset = preset)
+                    refreshIndex()
+                }
+                .onFailure { error ->
+                    _chat.value = _chat.value.copy(error = describe(error, "切换权限失败"))
+                }
+        }
+    }
+
+    /** Load the permission presets the host offers. */
+    fun loadPermissionOptions() {
+        viewModelScope.launch {
+            runCatching { repo.permissionCatalog() }
+                .onSuccess { _permissions.value = it.options }
+        }
+    }
+
+    private val _permissions = MutableStateFlow<List<String>>(emptyList())
+    val permissions: StateFlow<List<String>> = _permissions.asStateFlow()
 
     private fun detach() {
         activeStream?.cancel()

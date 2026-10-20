@@ -66,6 +66,8 @@ fun ChatScaffold(
     draft: String,
     onDraftChange: (String) -> Unit,
     onInfo: () -> Unit,
+    onBranch: (Long) -> Unit,
+    onPermissionClick: () -> Unit,
 ) {
     val colors = LocalDshColors.current
     var drawerOpen by remember { mutableStateOf(false) }
@@ -91,6 +93,8 @@ fun ChatScaffold(
                 onRunCommand = onRunCommand,
                 draft = draft,
                 onDraftChange = onDraftChange,
+                onBranch = onBranch,
+                onPermissionClick = onPermissionClick,
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
             )
         }
@@ -141,6 +145,8 @@ private fun TopBar(
     onMenu: () -> Unit,
     onNewSession: () -> Unit,
     onInfo: () -> Unit,
+    onBranch: (Long) -> Unit,
+    onPermissionClick: () -> Unit,
 ) {
     val colors = LocalDshColors.current
     Row(

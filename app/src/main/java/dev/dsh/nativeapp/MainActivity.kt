@@ -18,6 +18,7 @@ import dev.dsh.nativeapp.ui.pairing.PairingScreen
 import dev.dsh.nativeapp.ui.settings.SettingsScreen
 import dev.dsh.nativeapp.ui.theme.AppearanceMode
 import dev.dsh.nativeapp.ui.theme.DshTheme
+import dev.dsh.nativeapp.ui.theme.LocalDshColors
 import dev.dsh.nativeapp.vm.ChatViewModel
 import kotlinx.coroutines.launch
 
@@ -94,7 +95,9 @@ private fun DshRoot(
 
     var showModelPicker by remember { mutableStateOf(false) }
     var showInfo by remember { mutableStateOf(false) }
+    var showPermission by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
+    val permissions by vm.permissions.collectAsState()
 
     if (showSettings) {
         SettingsScreen(
@@ -146,7 +149,29 @@ private fun DshRoot(
         draft = draft,
         onDraftChange = { draft = it },
         onInfo = { showInfo = true },
+        onBranch = { seq -> vm.branchFrom(seq) },
+        onPermissionClick = { showPermission = true },
     )
+
+    if (showPermission) {
+        androidx.compose.material3.ModalBottomSheet(
+            onDismissRequest = { showPermission = false },
+            containerColor = LocalDshColors.current.bgBase,
+            dragHandle = null,
+        ) {
+            dev.dsh.nativeapp.ui.chat.PermissionPicker(
+                options = permissions.ifEmpty {
+                    listOf("read-only", "workspace-write", "danger-full-access")
+                },
+                current = chat.permissionPreset,
+                onPick = { preset ->
+                    showPermission = false
+                    vm.setPermission(preset)
+                },
+                onDismiss = { showPermission = false },
+            )
+        }
+    }
 
     if (showInfo) {
         dev.dsh.nativeapp.ui.chat.SessionInfoSheet(
