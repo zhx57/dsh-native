@@ -1,6 +1,9 @@
 package dev.dsh.nativeapp.ui.chat
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,15 +54,22 @@ fun SessionInfoSheet(
         dragHandle = null,
     ) {
         Column(
-            Modifier.padding(horizontal = DshSpacing.lg.dp),
-            verticalArrangement = Arrangement.spacedBy(DshSpacing.md.dp),
+            Modifier
+                .fillMaxWidth()
+                // A watch screen is shorter than this content, so the sheet body
+                // must scroll: without a height cap the sections below the fold
+                // were unreachable.
+                .heightIn(max = 440.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = DshSpacing.md.dp),
+            verticalArrangement = Arrangement.spacedBy(DshSpacing.sm.dp),
         ) {
             Text(
                 text = "会话信息",
-                fontSize = 16.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = colors.labelPrimary,
-                modifier = Modifier.padding(top = DshSpacing.md.dp),
+                modifier = Modifier.padding(top = DshSpacing.sm.dp),
             )
 
             // ---- 1. Context occupancy -------------------------------------
@@ -76,7 +86,7 @@ fun SessionInfoSheet(
                     }
                     Text(
                         text = "${fmt(tokens)} / ${fmt(window.toLong())}",
-                        fontSize = 22.sp,
+                        fontSize = 19.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = colors.labelPrimary,
                     )
@@ -183,7 +193,7 @@ private fun MetricRow(label: String, value: String, hint: String? = null, emphas
     ) {
         Text(
             text = label,
-            fontSize = 12.5.sp,
+            fontSize = 12.sp,
             color = if (emphasis) colors.labelSecondary else colors.labelTertiary,
             modifier = Modifier.weight(1f),
         )
