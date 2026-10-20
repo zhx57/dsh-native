@@ -81,7 +81,13 @@ fun UserTurn(item: TimelineItem.UserMessage) {
     }
 }
 
-/** Assistant turn: reasoning plus body, both selectable. */
+/**
+ * Assistant turn: reasoning plus body, both selectable.
+ *
+ * No in-bubble progress indicator: the web client ends the transcript with its own
+ * 深度求索中 row (see [RunningStatus]), and showing one here too stacked two
+ * "working" indicators on a screen that only fits a few lines.
+ */
 @Composable
 fun AssistantTurn(item: TimelineItem.AssistantMessage) {
     val selectable = LocalTextSelectable.current
@@ -101,9 +107,6 @@ fun AssistantTurn(item: TimelineItem.AssistantMessage) {
             }
         } else {
             AssistantBody(textBlocks)
-        }
-        if (item.streaming) {
-            TypingIndicator()
         }
     }
 }

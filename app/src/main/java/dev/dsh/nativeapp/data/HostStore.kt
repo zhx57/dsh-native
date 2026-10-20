@@ -77,6 +77,21 @@ class HostStore(context: Context) {
     }
 
     /**
+     * Session the operator was last reading.
+     *
+     * "Most recently updated" is not the same thing as "the conversation I was
+     * looking at": a background session can be touched by a job or a subagent while
+     * the operator is reading an older one, and a cold start then jumped to that
+     * other session. Remembering the actual last view is what makes relaunch resume
+     * where they left off.
+     */
+    fun lastSessionId(): String? = prefs.getString(KEY_LAST_SESSION, null)
+
+    fun saveLastSessionId(sessionId: String) {
+        prefs.edit().putString(KEY_LAST_SESSION, sessionId).apply()
+    }
+
+    /**
      * Pair from a launch URL such as `http://127.0.0.1:3080/?token=abc`.
      *
      * A bare origin (`http://host:3080`) is also accepted when the caller already
@@ -152,5 +167,6 @@ class HostStore(context: Context) {
         const val KEY_COOKIE = "cookie"
         const val KEY_LABEL = "label"
         const val KEY_PAIRED_AT = "paired_at"
+        const val KEY_LAST_SESSION = "last_session_id"
     }
 }

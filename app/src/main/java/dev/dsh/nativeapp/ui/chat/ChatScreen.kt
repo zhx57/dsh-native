@@ -244,6 +244,14 @@ fun ChatScreen(
                         )
                     }
                 }
+                // The web client ends the transcript with its running status, not
+                // inside the last message bubble. Keeping it as its own row also
+                // means the once-a-second clock does not recompose the transcript.
+                if (state.running) {
+                    item(key = "running-status") {
+                        RunningStatus(runningSince = state.runningSince)
+                    }
+                }
             }
 
             val anchors = remember(state.timeline) { turnAnchors(state.timeline) }

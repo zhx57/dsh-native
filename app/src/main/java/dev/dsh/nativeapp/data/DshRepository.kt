@@ -196,6 +196,89 @@ class DshRepository(private val client: DshClient) {
     /** One `session/projections` answer: revision plus the value bag. */
     data class ProjectionSnapshot(val asOfSeq: Long, val values: JsonObject)
 
+    // -------------------------------------------------------------- settings
+
+    /**
+     * Read every settings namespace the host exposes.
+     *
+     * `settings/describe` is what the web UI's settings panes are built from: it
+     * returns each namespace with its current value and the schema that generated it.
+     * Reading it directly means the app shows the host's real configuration instead of
+     * a hand-maintained copy that drifts.
+     */
+    suspend fun settings(): SettingsSnapshot? = withContext(Dispatchers.IO) {
+        val value = runCatching { client.call("settings/describe", JsonObject(emptyMap())) }
+            .getOrNull() ?: return@withContext null
+        val obj = value as? JsonObject ?: return@withContext null
+        val namespaces = (obj["namespaces"] as? JsonArray).orEmpty().mapNotNull { element ->
+            val entry = element as? JsonObject ?: return@mapNotNull null
+            val ns = JsonText.string(entry["ns"]) ?: return@mapNotNull null
+            SettingsNamespace(
+                ns = ns,
+                // Absent means the namespace is unset and the schema default applies.
+                value = entry["value"] as? JsonObject,
+                autoGenerate = JsonText.bool(entry["autoGenerate"]) ?: false,
+            )
+        }
+        SettingsSnapshot(
+            writable = JsonText.bool(obj["writable"]) ?: false,
+            hasDocument = JsonText.bool(obj["hasDocument"]) ?: false,
+            namespaces = namespaces,
+        )
+    }
+
+    /**
+     * Set one leaf inside a settings namespace.
+     *
+     * This is the same `set` op the web UI sends: `path` addresses the leaf and
+     * `value` replaces it. Only the touched leaf changes, so unrelated settings the
+     * user edited elsewhere survive.
+     */
+    suspend fun updateSetting(
+        ns: String,
+        path: List<String>,
+        value: JsonElement,
+    ): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            client.call(
+                "settings/mutate",
+                buildJsonObject {
+                    put("ns", ns)
+                    put(
+                        "ops",
+                        buildJsonArray {
+                            add(
+                                buildJsonObject {
+                                    put("op", "set")
+                                    put("path", buildJsonArray { path.forEach { add(JsonPrimitive(it)) } })
+                                    put("value", value)
+                                },
+                            )
+                        },
+                    )
+                },
+            )
+            true
+        }.getOrDefault(false)
+    }
+
+    /** One settings namespace as returned by `settings/describe`. */
+    data class SettingsNamespace(
+        val ns: String,
+        val value: JsonObject?,
+        val autoGenerate: Boolean,
+    )
+
+    /** Whole settings document. */
+    data class SettingsSnapshot(
+        val writable: Boolean,
+        val hasDocument: Boolean,
+        val namespaces: List<SettingsNamespace>,
+    ) {
+        /** Current value of one namespace, or null when unset. */
+        fun find(ns: String): JsonObject? = namespaces.firstOrNull { it.ns == ns }?.value
+    }
+
     // ------------------------------------------------------------- commands
 
     /** List the slash commands this session's host offers. */

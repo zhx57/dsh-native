@@ -102,6 +102,15 @@ data class DshColors(
     val labelDimmed: Color,
     val brandPrimary: Color,
     val brandText: Color,
+    /**
+     * Colour of the live "深度求索中" status.
+     *
+     * Transcribed from `--dsw-alias-label-deep-diving`, a `color-mix` the web client
+     * resolves per theme: 55% deepseek-450 over neutral-bluish-400 on light, and
+     * 70% deepseek-500 over blue-950 on dark. Pre-mixed here because Compose has no
+     * `color-mix`, and the two themes need different directions of contrast.
+     */
+    val deepDiving: Color,
     val link: Color,
     val interactiveHover: Color,
     val interactiveActive: Color,
@@ -152,6 +161,7 @@ val LightColors = DshColors(
     labelDimmed = Static.bluish200,
     brandPrimary = Static.bluish1000,
     brandText = Static.bluish1000,
+    deepDiving = Color(0xFF345EBA),
     link = Static.deepseek500,
     interactiveHover = Color(0x0F263148),
     interactiveActive = Color(0x1A263148),
@@ -202,6 +212,7 @@ val DarkColors = DshColors(
     labelDimmed = Static.bluish750,
     brandPrimary = Static.bluish50,
     brandText = Static.bluish50,
+    deepDiving = Color(0xFF7D9ADE),
     link = Static.deepseek400,
     interactiveHover = Color(0x14FFFFFF),
     interactiveActive = Color(0x24FFFFFF),

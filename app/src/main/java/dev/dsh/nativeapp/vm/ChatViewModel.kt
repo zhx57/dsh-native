@@ -84,7 +84,14 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
             // a stop with a stale flag either did nothing or cancelled the wrong turn.
             channel.status.collect { (sessionId, running) ->
                 if (sessionId == _chat.value.sessionId) {
-                    _chat.value = _chat.value.copy(running = running)
+                    // Stamp the turn's start so the 深度求索中 clock measures this run
+                    // and not the time since the app launched.
+                    val since = when {
+                        !running -> null
+                        _chat.value.running -> _chat.value.runningSince
+                        else -> System.currentTimeMillis()
+                    }
+                    _chat.value = _chat.value.copy(running = running, runningSince = since)
                 }
                 // Keep the drawer's spinner honest too.
                 _sessions.value = _sessions.value.map { row ->
@@ -140,6 +147,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         )
         viewModelScope.launch {
             runCatching { repo.updateQueue(sessionId, itemId, "remove") }
+                .onSuccess { refreshProjections() }
                 .onFailure { error ->
                     _chat.value = _chat.value.copy(error = describe(error, "删除排队消息失败"))
                     refreshIndex()
@@ -153,6 +161,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         if (text.isBlank()) return
         viewModelScope.launch {
             runCatching { repo.updateQueue(sessionId, itemId, "edit", text) }
+                .onSuccess { refreshProjections() }
                 .onFailure { error ->
                     _chat.value = _chat.value.copy(error = describe(error, "修改排队消息失败"))
                 }
@@ -170,6 +179,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         if (!_chat.value.running) return
         viewModelScope.launch {
             runCatching { repo.updateQueue(sessionId, itemId, "steer") }
+                .onSuccess { refreshProjections() }
                 .onFailure { error ->
                     _chat.value = _chat.value.copy(error = describe(error, "插话发送失败"))
                 }
@@ -345,6 +355,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                     subtitle = summary.cwd?.substringAfterLast('\\')?.substringAfterLast('/') ?: "",
                     running = summary.running,
                     updatedAt = summary.updatedAt,
+                    blank = summary.blank,
                 )
             }
             .sortedByDescending { it.updatedAt }
@@ -364,13 +375,23 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
     }
 
     /**
-     * Land on the most recent session after a cold start, matching the web app
-     * restoring the last conversation instead of an empty pane.
+     * Land on the session the operator was last reading.
+     *
+     * The web app restores the last conversation rather than the freshest one. Those
+     * differ: a background job, a subagent or a scheduled turn can bump another
+     * session's `updatedAt` while the operator is reading an older one, so ordering
+     * by recency jumped them somewhere they were not. The remembered id wins when it
+     * still exists; otherwise fall back to the most recent non-blank session.
      */
     private fun openMostRecentIfIdle() {
         if (_chat.value.sessionId != null) return
-        val first = _sessions.value.firstOrNull() ?: return
-        openSession(first.sessionId)
+        val rows = _sessions.value
+        if (rows.isEmpty()) return
+        val remembered = app.hostStore.lastSessionId()?.takeIf { id -> rows.any { it.sessionId == id } }
+        val target = remembered
+            ?: rows.firstOrNull { !it.blank }?.sessionId
+            ?: rows.first().sessionId
+        openSession(target)
     }
 
     private fun followWorkspaces() {
@@ -415,6 +436,10 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
     fun openSession(sessionId: String) {
         if (_chat.value.sessionId == sessionId && activeStream != null) return
 
+        // Remember what the operator is actually reading, so relaunch resumes here
+        // instead of jumping to whichever session a background job touched last.
+        app.hostStore.saveLastSessionId(sessionId)
+
         // Re-entering the session that is already loaded keeps its timeline until
         // the fresh snapshot arrives, so the screen never flashes empty.
         val keepTimeline = loadedSessionId == sessionId
@@ -458,11 +483,20 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                 val selection = detectModelSelection(value)
                 val extras = detectExtras(value)
                 viewModelScope.launch {
+                    val nextRunning = running ?: _chat.value.running
+                    val since = when {
+                        !nextRunning -> null
+                        _chat.value.running -> _chat.value.runningSince
+                        // The fallback path saw turn/start here, so this is the
+                        // best available stamp for the 深度求索中 clock.
+                        else -> System.currentTimeMillis()
+                    }
                     _chat.value = _chat.value.copy(
                         timeline = activeBuilder.snapshot(),
                         title = title,
                         connecting = false,
-                        running = running ?: _chat.value.running,
+                        running = nextRunning,
+                        runningSince = since,
                         tokenUsage = usage ?: _chat.value.tokenUsage,
                         todos = projections?.first ?: _chat.value.todos,
                         permissionPreset = projections?.second ?: _chat.value.permissionPreset,
@@ -829,7 +863,15 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         val trimmed = text.trim()
         val files = _attachments.value.map { it.second }
         if (trimmed.isEmpty() && files.isEmpty()) return
-        val mode = if (_chat.value.running) "steer" else "queue"
+        // `queue` always: the message waits for the next turn and appears in the
+        // queue dock. `steer` means "interrupt the running turn and take over",
+        // which is what the dock's 插话发送 button is for. Sending with `steer`
+        // here made every message while a turn ran cancel that turn, and the queue
+        // dock could never fill — the queue mechanism looked unimplemented.
+        //
+        // The web UI's own `ui-conversation.busyEnter` setting is `"queue"`, i.e.
+        // pressing enter while busy queues rather than steers.
+        val mode = "queue"
         // Surface the in-flight window: the host admits the prompt and only then
         // lists it in the inbox, so without this the message briefly vanishes.
         _chat.value = _chat.value.copy(sending = true)
@@ -842,7 +884,14 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                     _attachments.value = emptyList()
                 }
             }
-                .onSuccess { refreshIndexSoon() }
+                .onSuccess {
+                    refreshIndexSoon()
+                    // The queue dock reads `inbox.next-turn`, which the follow stream
+                    // only reports in a snapshot. Re-read projections so a message sent
+                    // into the queue appears in the dock immediately instead of after
+                    // the next unrelated update.
+                    refreshProjections()
+                }
                 .onFailure { error ->
                     _chat.value = _chat.value.copy(error = describe(error, "发送失败"))
                 }
@@ -982,6 +1031,48 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
             runCatching { repo.permissionCatalog() }
                 .onSuccess { _permissions.value = it.options }
         }
+    }
+
+    // -------------------------------------------------------------- settings
+
+    private val _settings = MutableStateFlow<dev.dsh.nativeapp.data.DshRepository.SettingsSnapshot?>(null)
+
+    /** The host's live settings document, as the web UI's settings panes read it. */
+    val settings: StateFlow<dev.dsh.nativeapp.data.DshRepository.SettingsSnapshot?> =
+        _settings.asStateFlow()
+
+    /** Re-read the settings document. */
+    fun loadSettings() {
+        viewModelScope.launch {
+            runCatching { repo.settings() }.onSuccess { _settings.value = it }
+        }
+    }
+
+    /**
+     * Set one leaf of a settings namespace.
+     *
+     * Optimistically applies the value so a chip does not flick back while the
+     * round-trip completes, then re-reads the document because the host normalizes
+     * what it stores.
+     */
+    fun updateSetting(ns: String, path: List<String>, value: kotlinx.serialization.json.JsonElement) {
+        viewModelScope.launch {
+            val ok = repo.updateSetting(ns, path, value)
+            if (!ok) {
+                _chat.value = _chat.value.copy(error = "保存设置失败")
+                return@launch
+            }
+            loadSettings()
+        }
+    }
+
+    /** Local view of a settings leaf, used until the host answers. */
+    fun settingValue(ns: String, path: List<String>): kotlinx.serialization.json.JsonElement? {
+        var current: kotlinx.serialization.json.JsonElement? = _settings.value?.find(ns) ?: return null
+        for (segment in path) {
+            current = (current as? JsonObject)?.get(segment) ?: return null
+        }
+        return current
     }
 
     private val _permissions = MutableStateFlow<List<String>>(emptyList())

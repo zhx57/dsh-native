@@ -9,6 +9,14 @@ data class ChatUiState(
     val title: String = "",
     val timeline: List<TimelineItem> = emptyList(),
     val running: Boolean = false,
+    /**
+     * Epoch millis when the current turn started, or null when unknown.
+     *
+     * Drives the 深度求索中 clock. Null means the app attached mid-turn and no
+     * `turn/start` was seen, in which case the status shows no elapsed time rather
+     * than a wrong one.
+     */
+    val runningSince: Long? = null,
     val connecting: Boolean = true,
     val error: String? = null,
     val tokenUsage: TokenUsage? = null,
@@ -128,6 +136,8 @@ data class SessionRow(
     val subtitle: String,
     val running: Boolean,
     val updatedAt: Long,
+    /** A session with no turn yet; cold start prefers a real conversation. */
+    val blank: Boolean = false,
 )
 
 /** Workspace group in the drawer. */

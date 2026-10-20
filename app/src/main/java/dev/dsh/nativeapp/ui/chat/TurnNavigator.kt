@@ -5,9 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -150,31 +148,5 @@ private fun TurnCounter(
                 maxLines = 1,
             )
         }
-    }
-}
-
-/** Bar showing where the viewport sits inside the turn list. */
-@Composable
-fun TurnProgress(
-    currentTurn: Int?,
-    totalTurns: Int,
-    modifier: Modifier = Modifier,
-) {
-    val colors = LocalDshColors.current
-    if (totalTurns <= 1) return
-    val fraction = ((currentTurn ?: 1).toFloat() / totalTurns.toFloat()).coerceIn(0f, 1f)
-    Row(
-        modifier
-            .width(2.dp)
-            .fillMaxHeight()
-            .background(colors.borderL1),
-    ) {
-        Spacer(Modifier.height(0.dp))
-        Box(
-            Modifier
-                .fillMaxHeight(fraction.coerceAtLeast(0.04f))
-                .width(2.dp)
-                .background(colors.labelTertiary.copy(alpha = 0.5f)),
-        )
     }
 }

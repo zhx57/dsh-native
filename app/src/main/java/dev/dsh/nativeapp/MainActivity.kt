@@ -111,6 +111,7 @@ private fun DshRoot(
     val attachments by vm.attachments.collectAsState()
     val loadingOlder by vm.loadingOlder.collectAsState()
     val hasMoreHistory by vm.hasMoreHistory.collectAsState()
+    val hostSettings by vm.settings.collectAsState()
 
     // The launcher callback is not an Activity member scope, so the context is
     // captured once as a local value.
@@ -281,7 +282,12 @@ private fun DshRoot(
                 SettingsScreen(
                     host = host,
                     appearance = appearance,
+                    settings = hostSettings,
+                    modelLabel = modelLabel,
                     onAppearance = onAppearance,
+                    onLoadSettings = { vm.loadSettings() },
+                    onSetting = { ns, path, value -> vm.updateSetting(ns, path, value) },
+                    onModelClick = { showModelPicker = true },
                     onBack = { showSettings = false },
                     onUnpair = {
                         app.unpair()
