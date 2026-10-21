@@ -27,7 +27,9 @@ class SessionMetricsTest {
     fun `occupancy clamps at one hundred and survives a zero window`() {
         assertEquals(100, ContextOccupancy(usedTokens = 2_000, contextWindow = 1_000).percent)
         assertEquals(0, ContextOccupancy(usedTokens = 10, contextWindow = 0).percent)
-        assertEquals(0, ContextOccupancy(usedTokens = 5, contextWindow = 10).remaining)
+        assertEquals(5, ContextOccupancy(usedTokens = 5, contextWindow = 10).remaining)
+        // An over-full window must not report negative headroom.
+        assertEquals(0, ContextOccupancy(usedTokens = 20, contextWindow = 10).remaining)
     }
 
     @Test
