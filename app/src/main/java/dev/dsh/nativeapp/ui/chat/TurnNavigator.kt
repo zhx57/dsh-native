@@ -31,12 +31,17 @@ import dev.dsh.nativeapp.ui.theme.LocalDshColors
  * The transcript of a real session is dominated by tool calls — one turn can span
  * dozens of rows — so stepping by row or by message made a tap look like it did
  * nothing. The web client's rail navigates *turns*, and that is what a reader
- * actually wants: "/35" jumps to that turn, the arrows step one turn at a time.
+ * actually wants: the counter jumps to that turn, the arrows step one at a time.
+ *
+ * @param currentTurn turn under the viewport, as numbered in the log.
+ * @param lastTurn highest turn loaded. This is deliberately the turn *number*, not
+ *   the count of loaded anchors: history paging can begin at turn 30, and pairing a
+ *   real turn number with an anchor count produced nonsense like "35 / 5".
  */
 @Composable
 fun TurnNavigator(
     currentTurn: Int?,
-    totalTurns: Int,
+    lastTurn: Int,
     canGoUp: Boolean,
     canGoDown: Boolean,
     showJumpToLatest: Boolean,
@@ -64,7 +69,7 @@ fun TurnNavigator(
         // screen a separate button cost more height than the transcript could spare.
         TurnCounter(
             currentTurn = currentTurn,
-            totalTurns = totalTurns,
+            totalTurns = lastTurn,
             highlight = showJumpToLatest,
             onClick = onJumpToLatest,
         )

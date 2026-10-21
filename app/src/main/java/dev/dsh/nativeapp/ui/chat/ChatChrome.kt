@@ -4,6 +4,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -111,8 +114,14 @@ fun TodoPanel(todos: List<TodoItem>, modifier: Modifier = Modifier) {
         }
 
         AnimatedVisibility(visible = expanded) {
+            // Bounded and scrollable: a ten-item list used to run past the bottom of a
+            // watch screen and take the composer with it. Four rows' worth keeps the
+            // rows readable and lets the rest scroll.
             Column(
-                Modifier.padding(horizontal = DshSpacing.md.dp, vertical = 6.dp),
+                Modifier
+                    .heightIn(max = 108.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = DshSpacing.md.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
                 todos.forEach { todo ->

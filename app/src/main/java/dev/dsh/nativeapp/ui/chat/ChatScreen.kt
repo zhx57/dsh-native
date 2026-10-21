@@ -11,8 +11,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyListState
@@ -29,6 +32,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.collectAsState
@@ -56,6 +60,16 @@ import dev.dsh.nativeapp.ui.theme.LocalDshColors
 
 /** Rows the list prepends before the timeline itself. */
 private const val HeadRows = 1
+
+/**
+ * Whether the soft keyboard is showing.
+ *
+ * Isolated so the experimental-API opt-in lives in one place instead of on the
+ * screen composable.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun isKeyboardVisible(): Boolean = androidx.compose.foundation.layout.WindowInsets.isImeVisible
 
 /** Native transcript for one session, with the composer docked underneath. */
 @Composable
@@ -176,6 +190,9 @@ fun ChatScreen(
     // make, so paging has to chain or it would deadlock.
     var pageArmed by remember { mutableStateOf(false) }
 
+    /** Row key and pixel offset to restore after a page is prepended. */
+    var historyAnchor by remember { mutableStateOf<Pair<String, Int>?>(null) }
+
     LaunchedEffect(listState, itemCount) {
         snapshotFlow {
             Triple(
@@ -196,7 +213,25 @@ fun ChatScreen(
         val cannotScroll = !listState.canScrollForward
         if (!pageArmed && !cannotScroll) return@LaunchedEffect
         pageArmed = false
+        // Remember what the reader is looking at, so the prepended page lands *above*
+        // it instead of replacing it. The list keeps its first visible *index*
+        // across a data change, so inserting N rows at the front silently shifts the
+        // viewport N rows earlier — which read as "the scroll jumped into the newly
+        // loaded block" rather than continuing from the end of what was just loaded.
+        historyAnchor = listState.layoutInfo.visibleItemsInfo
+            .firstOrNull { it.index >= HeadRows }
+            ?.let { (it.key as? String)?.let { key -> key to it.offset } }
         onLoadOlder()
+    }
+
+    // Re-anchor after a prepend: put the recorded row back where it was on screen.
+    LaunchedEffect(itemCount) {
+        val anchor = historyAnchor ?: return@LaunchedEffect
+        val index = state.timeline.indexOfFirst { row -> row.keyOf() == anchor.first }
+        if (index >= 0) {
+            historyAnchor = null
+            listState.scrollToItem(index + HeadRows, anchor.second)
+        }
     }
 
     // Follow the tail while the operator stays there; a plain scroll keeps the
@@ -279,7 +314,7 @@ fun ChatScreen(
 
             TurnNavigator(
                 currentTurn = here,
-                totalTurns = anchors.size,
+                lastTurn = anchors.lastOrNull()?.turn ?: 0,
                 canGoUp = previousTurn(anchors, timelineFirst) != null,
                 canGoDown = nextTurn(anchors, timelineLast) != null,
                 showJumpToLatest = !followTail && anchors.isNotEmpty(),
@@ -342,65 +377,82 @@ fun ChatScreen(
             }
         }
 
-        // Pending questions are answered on their own full-screen surface, not here:
-        // the composer column does not scroll, so an inline card was unusable.
-
-        // Messages accepted while a turn runs wait here rather than disappearing.
-        if (state.sending) {
-            Text(
-                text = "发送中…",
-                fontSize = 11.sp,
-                color = colors.labelTertiary,
-                modifier = Modifier.padding(horizontal = DshSpacing.md.dp, vertical = 2.dp),
-            )
-        }
-        QueueDock(
-            queued = state.queued,
-            running = state.running,
-            onSteer = onSteerQueued,
-            onEdit = onEditQueued,
-            onRemove = onRemoveQueued,
-            modifier = Modifier.padding(
-                horizontal = DshSpacing.md.dp,
-                vertical = DshSpacing.xs.dp,
-            ),
-        )
-
-        if (state.pendingApproval != null) {
-            ApprovalCard(
-                toolName = state.pendingApproval.toolName,
-                reason = state.pendingApproval.reason,
-                detail = state.pendingApproval.detail,
-                onAllow = onAllow,
-                onReject = onReject,
+        // Auxiliary panels live in one bounded, scrollable block that is hidden while
+        // the keyboard is up.
+        //
+        // Column measures unweighted children in order with the *remaining* height,
+        // so the queue, approval and todo panels — which sat above the composer —
+        // consumed the window and left the text field a few pixels: with the keyboard
+        // open it collapsed to a single line, and the todo list was cut off at the
+        // same time. Hiding them while typing gives the composer the room, and the cap
+        // bounds them when they are shown.
+        val auxCap = (LocalConfiguration.current.screenHeightDp * 0.34f).dp
+        val typing = isKeyboardVisible()
+        if (!typing) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = auxCap)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+            // Messages accepted while a turn runs wait here rather than disappearing.
+            if (state.sending) {
+                Text(
+                    text = "发送中…",
+                    fontSize = 11.sp,
+                    color = colors.labelTertiary,
+                    modifier = Modifier.padding(horizontal = DshSpacing.md.dp, vertical = 2.dp),
+                )
+            }
+            QueueDock(
+                queued = state.queued,
+                running = state.running,
+                onSteer = onSteerQueued,
+                onEdit = onEditQueued,
+                onRemove = onRemoveQueued,
                 modifier = Modifier.padding(
                     horizontal = DshSpacing.md.dp,
                     vertical = DshSpacing.xs.dp,
                 ),
             )
-        }
 
-        if (state.todos.isNotEmpty()) {
-            TodoPanel(
-                todos = state.todos,
-                modifier = Modifier.padding(
-                    horizontal = DshSpacing.md.dp,
-                    vertical = DshSpacing.xs.dp,
-                ),
-            )
-        }
+            if (state.pendingApproval != null) {
+                ApprovalCard(
+                    toolName = state.pendingApproval.toolName,
+                    reason = state.pendingApproval.reason,
+                    detail = state.pendingApproval.detail,
+                    onAllow = onAllow,
+                    onReject = onReject,
+                    modifier = Modifier.padding(
+                        horizontal = DshSpacing.md.dp,
+                        vertical = DshSpacing.xs.dp,
+                    ),
+                )
+            }
 
-        // One action row for the whole transcript. Per-message buttons cost a
-        // full line each on a watch-sized screen and pushed the composer down.
-        if (state.timeline.any { it is TimelineItem.AssistantMessage }) {
-            val clipboard = LocalClipboardManager.current
-            TranscriptActions(
-                onCopyAll = { clipboard.setText(AnnotatedString(plainTextOf(state.timeline))) },
-                onBranch = {
-                    branchSeqOf(state.timeline)?.let(onBranch)
-                },
-                modifier = Modifier.padding(horizontal = DshSpacing.md.dp),
-            )
+            if (state.todos.isNotEmpty()) {
+                TodoPanel(
+                    todos = state.todos,
+                    modifier = Modifier.padding(
+                        horizontal = DshSpacing.md.dp,
+                        vertical = DshSpacing.xs.dp,
+                    ),
+                )
+            }
+
+            // One action row for the whole transcript. Per-message buttons cost a
+            // full line each on a watch-sized screen and pushed the composer down.
+            if (state.timeline.any { it is TimelineItem.AssistantMessage }) {
+                val clipboard = LocalClipboardManager.current
+                TranscriptActions(
+                    onCopyAll = { clipboard.setText(AnnotatedString(plainTextOf(state.timeline))) },
+                    onBranch = {
+                        branchSeqOf(state.timeline)?.let(onBranch)
+                    },
+                    modifier = Modifier.padding(horizontal = DshSpacing.md.dp),
+                )
+            }
+            }
         }
 
         Composer(
