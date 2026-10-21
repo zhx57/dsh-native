@@ -27,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.dsh.nativeapp.data.ContentBlock
@@ -48,6 +49,10 @@ fun UserTurn(item: TimelineItem.UserMessage) {
     val colors = LocalDshColors.current
     val selectable = LocalTextSelectable.current
     val text = item.blocks.filterIsInstance<ContentBlock.Text>().joinToString("\n") { it.text }
+    // Attachments used to be dropped here, so a sent file or picture left no trace in
+    // the transcript. They are listed under the text, the way the web bubble does.
+    val files = item.blocks.filterIsInstance<ContentBlock.File>()
+    val images = item.blocks.filterIsInstance<ContentBlock.Image>()
     val bubbleWidth = LocalConfiguration.current.screenWidthDp.dp * 0.82f
 
     Column(
@@ -60,25 +65,75 @@ fun UserTurn(item: TimelineItem.UserMessage) {
                 .background(colors.bubble, RoundedCornerShape(DshRadius.xl.dp))
                 .padding(horizontal = DshSpacing.lg.dp, vertical = DshSpacing.md.dp),
         ) {
-            if (selectable) {
-                SelectionContainer {
-                    Text(
-                        text = text,
-                        fontSize = 15.sp,
-                        lineHeight = 24.sp,
-                        color = colors.labelPrimary,
-                    )
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (text.isNotBlank()) {
+                    if (selectable) {
+                        SelectionContainer {
+                            Text(
+                                text = text,
+                                fontSize = 15.sp,
+                                lineHeight = 24.sp,
+                                color = colors.labelPrimary,
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = text,
+                            fontSize = 15.sp,
+                            lineHeight = 24.sp,
+                            color = colors.labelPrimary,
+                        )
+                    }
                 }
-            } else {
-                Text(
-                    text = text,
-                    fontSize = 15.sp,
-                    lineHeight = 24.sp,
-                    color = colors.labelPrimary,
-                )
+                images.forEach { AttachmentChip(icon = "🖼", label = it.name ?: "图片") }
+                files.forEach { AttachmentChip(icon = "📄", label = it.name, size = it.bytes) }
             }
         }
     }
+}
+
+/**
+ * One attachment row inside a user bubble.
+ *
+ * Deliberately a chip rather than a thumbnail: the log stores an attachment
+ * reference and fetching bytes needs a second round trip per file, which on a
+ * watch-sized screen costs more than it shows.
+ */
+@Composable
+private fun AttachmentChip(icon: String, label: String, size: Long = 0L) {
+    val colors = LocalDshColors.current
+    Row(
+        Modifier
+            .background(colors.bgBase.copy(alpha = 0.55f), RoundedCornerShape(DshRadius.sm.dp))
+            .padding(horizontal = 7.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text = icon, fontSize = 11.sp)
+        Spacer(Modifier.width(5.dp))
+        Text(
+            text = label,
+            fontSize = 11.5.sp,
+            color = colors.labelSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 150.dp),
+        )
+        if (size > 0) {
+            Spacer(Modifier.width(5.dp))
+            Text(
+                text = formatBytes(size),
+                fontSize = 10.sp,
+                color = colors.labelCaption,
+            )
+        }
+    }
+}
+
+/** Human-readable file size. */
+internal fun formatBytes(bytes: Long): String = when {
+    bytes >= 1 shl 20 -> String.format("%.1f MB", bytes / (1 shl 20).toDouble())
+    bytes >= 1 shl 10 -> String.format("%.0f KB", bytes / (1 shl 10).toDouble())
+    else -> "$bytes B"
 }
 
 /**

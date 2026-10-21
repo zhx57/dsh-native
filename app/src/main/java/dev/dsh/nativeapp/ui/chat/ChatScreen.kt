@@ -165,26 +165,38 @@ fun ChatScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // Load earlier history when the operator reaches the top. The follow stream only
-    // replays the newest window, so without this the transcript simply ended.
+    // History paging: one page per deliberate pull, like the browser behaves.
     //
-    // Guarded three ways, because a bare "index is near the top" test fired while the
-    // list was still empty and burned the only chance to page:
-    //  - `itemCount > 0`, so an unpainted list cannot ask for history;
-    //  - `hasMoreHistory`, so an exhausted log stops asking;
-    //  - `loadingOlder`, so one page is in flight at a time.
+    // The previous version fired whenever the list was at index 0, and re-fired as
+    // soon as the prepend finished — so touching the top once loaded the entire log
+    // without stopping. Now a page needs a *gesture*: `pageArmed` is set only while
+    // the operator is actively dragging at the very top.
     //
-    // `itemCount` is a key as well: when content arrives while the operator is already
-    // parked at the top, the anchor does not move, so nothing else would re-arm this.
-    LaunchedEffect(listState, hasMoreHistory, loadingOlder, itemCount) {
-        if (!hasMoreHistory || loadingOlder || itemCount == 0) return@LaunchedEffect
+    // The one exception is content shorter than the viewport: there is no gesture to
+    // make, so paging has to chain or it would deadlock.
+    var pageArmed by remember { mutableStateOf(false) }
+
+    LaunchedEffect(listState, itemCount) {
         snapshotFlow {
-            // Read from the state object: the offset lives there, not on layoutInfo.
-            listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+            Triple(
+                listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset,
+                listState.isScrollInProgress,
+            )
+        }.collect { (first, offset, scrolling) ->
+            if (scrolling && first == 0 && offset < 48) pageArmed = true
         }
-            .collect { (first, offset) ->
-                if (first == 0 && offset < 48) onLoadOlder()
-            }
+    }
+
+    LaunchedEffect(listState, hasMoreHistory, loadingOlder, itemCount, pageArmed) {
+        if (!hasMoreHistory || loadingOlder || itemCount == 0) return@LaunchedEffect
+        val atTop = listState.firstVisibleItemIndex == 0 &&
+            listState.firstVisibleItemScrollOffset < 48
+        if (!atTop) return@LaunchedEffect
+        val cannotScroll = !listState.canScrollForward
+        if (!pageArmed && !cannotScroll) return@LaunchedEffect
+        pageArmed = false
+        onLoadOlder()
     }
 
     // Follow the tail while the operator stays there; a plain scroll keeps the

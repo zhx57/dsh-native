@@ -50,18 +50,34 @@ import dev.dsh.nativeapp.ui.theme.DshRadius
 import dev.dsh.nativeapp.ui.theme.DshSpacing
 import dev.dsh.nativeapp.ui.theme.LocalDshColors
 
-/** Reasoning summary block, collapsed by default like the web transcript. */
+/**
+ * Reasoning disclosure, transcribed from the web client's `ReasoningRow`.
+ *
+ * The web behaviour, and why each part exists:
+ *
+ *  - it stays **collapsed** unless the reader opens it, so a finished transcript
+ *    stays compact;
+ *  - the collapsed row is **not** a bare label: it carries a summary that, while
+ *    running, is the first line of the **latest completed paragraph** and, once
+ *    settled, the first line of the block. `**` markers are stripped. That summary
+ *    advancing is what makes the thinking legible while it streams; without it the
+ *    panel said only 思考 and the text appeared in one lump on commit;
+ *  - `expandOnRowClick` — the whole row toggles, not just a chevron.
+ *
+ * The title reads 正在思考 while the block is the streaming tail and 思考 once it is
+ * settled, matching the ask from the device: collapsed while working, but visibly
+ * working.
+ */
 @Composable
 fun ReasoningBlock(text: String, streaming: Boolean) {
     val colors = LocalDshColors.current
     var expanded by remember { mutableStateOf(false) }
 
-    // While the model is thinking, show the text as it arrives. Collapsed-by-default
-    // meant the panel only said 思考中… and the reasoning then appeared in one block
-    // when the step committed, which read as "no streaming at all". A settled block
-    // still defaults to collapsed, so a finished transcript stays compact.
-    LaunchedEffect(streaming) {
-        if (streaming) expanded = true
+    // While running the summary is the latest *completed* paragraph's first line, so
+    // it advances paragraph by paragraph instead of flickering on every token.
+    val summary = remember(text, streaming) {
+        val source = if (streaming) latestCompletedParagraphFirstLine(text) else firstLine(text)
+        source.replace("**", "").trim()
     }
 
     Column(
@@ -80,38 +96,89 @@ fun ReasoningBlock(text: String, streaming: Boolean) {
             Icon(
                 imageVector = Icons.Outlined.Psychology,
                 contentDescription = null,
-                tint = colors.labelTertiary,
+                tint = if (streaming) colors.deepDiving else colors.labelTertiary,
                 modifier = Modifier.size(16.dp),
             )
             Spacer(Modifier.width(7.dp))
             Text(
-                text = if (streaming) "思考中…" else "已思考",
+                text = if (streaming) "正在思考" else "思考",
                 fontSize = 13.sp,
-                color = colors.labelTertiary,
-                modifier = Modifier.weight(1f),
+                fontWeight = FontWeight.Medium,
+                color = if (streaming) colors.deepDiving else colors.labelTertiary,
             )
+            if (!expanded && summary.isNotBlank()) {
+                // The collapsed summary is the whole point: it is the live preview.
+                Text(
+                    text = " · ",
+                    fontSize = 13.sp,
+                    color = colors.labelCaption,
+                )
+                Text(
+                    text = summary,
+                    fontSize = 13.sp,
+                    color = colors.labelCaption,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            } else {
+                Spacer(Modifier.weight(1f))
+            }
             Icon(
                 imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                contentDescription = null,
+                contentDescription = if (expanded) "收起" else "展开",
                 tint = colors.labelTertiary,
                 modifier = Modifier.size(18.dp),
             )
         }
         AnimatedVisibility(visible = expanded) {
-            Text(
-                text = text,
-                fontSize = 13.sp,
-                lineHeight = 20.sp,
-                color = colors.labelSecondary,
-                modifier = Modifier.padding(
-                    start = DshSpacing.md.dp,
-                    end = DshSpacing.md.dp,
-                    bottom = DshSpacing.md.dp,
-                ),
-            )
+            // Tapping anywhere in the open body collapses it, which is what the web
+            // client's expand-on-row-click region covers.
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = false }
+                    .padding(
+                        start = DshSpacing.md.dp,
+                        end = DshSpacing.md.dp,
+                        bottom = DshSpacing.md.dp,
+                    ),
+            ) {
+                MarkdownText(
+                    source = text,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }
+
+/**
+ * First line of the last paragraph that already has a newline after it.
+ *
+ * Mirrors the web client's `latestCompletedParagraphFirstLine`: a paragraph counts
+ * only once its first line is terminated, so the preview does not grow mid-line.
+ */
+internal fun latestCompletedParagraphFirstLine(text: String): String {
+    var summary = ""
+    var paragraphStart = 0
+    val separator = Regex("\\r?\\n(?:[\\t ]*\\r?\\n)+")
+    while (true) {
+        val next = separator.find(text, paragraphStart)
+        val paragraphEnd = next?.range?.first ?: text.length
+        val newline = text.indexOf('\n', paragraphStart)
+        if (newline != -1 && newline <= paragraphEnd) {
+            val candidate = text.substring(paragraphStart, newline).trim()
+            if (candidate.isNotEmpty()) summary = candidate
+        }
+        if (next == null) return summary
+        paragraphStart = next.range.last + 1
+    }
+}
+
+/** First non-empty line of a settled block. */
+internal fun firstLine(text: String): String =
+    text.lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
 
 /** One tool invocation with its collapsed result. */
 @Composable

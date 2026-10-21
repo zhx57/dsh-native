@@ -12,6 +12,15 @@ sealed interface ContentBlock {
     data class Reasoning(val text: String) : ContentBlock
     data class Image(val mediaType: String, val data: String, val name: String?) : ContentBlock
     data class ToolCall(val id: String, val name: String, val arguments: String) : ContentBlock
+
+    /**
+     * A file the operator attached.
+     *
+     * The log stores an attachment reference, not the bytes:
+     * `{type:"file", attachment:{attachmentId, name, bytes}}`. It used to fall through
+     * to [Unknown] and was dropped, so a sent file left no trace in the transcript.
+     */
+    data class File(val name: String, val attachmentId: String, val bytes: Long) : ContentBlock
     data class Unknown(val type: String, val raw: JsonElement) : ContentBlock
 }
 
@@ -188,9 +197,28 @@ object EventParser {
                 "text" -> JsonText.string(obj["text"])?.let { ContentBlock.Text(it) }
                 "reasoning" -> JsonText.string(obj["text"])?.let { ContentBlock.Reasoning(it) }
                 "image" -> {
-                    val media = JsonText.string(obj["mediaType"]) ?: "image/png"
+                    // Two shapes exist: an inline `data` payload, or an attachment
+                    // reference. Both are surfaced so a sent picture is visible.
+                    val attachment = obj["attachment"] as? JsonObject
+                    val media = JsonText.string(obj["mediaType"])
+                        ?: JsonText.string(attachment?.get("mediaType"))
+                        ?: "image/png"
+                    val name = JsonText.string(obj["name"])
+                        ?: JsonText.string(attachment?.get("name"))
                     val data = JsonText.string(obj["data"])
-                    if (data == null) null else ContentBlock.Image(media, data, JsonText.string(obj["name"]))
+                    if (data == null && attachment == null) null
+                    else ContentBlock.Image(media, data.orEmpty(), name)
+                }
+                "file" -> {
+                    val attachment = obj["attachment"] as? JsonObject
+                    val name = JsonText.string(attachment?.get("name"))
+                        ?: JsonText.string(obj["name"])
+                        ?: "附件"
+                    val id = JsonText.string(attachment?.get("attachmentId"))
+                        ?: JsonText.string(obj["attachmentId"])
+                        ?: JsonText.string(obj["receiptId"])
+                        ?: ""
+                    ContentBlock.File(name, id, JsonText.long(attachment?.get("bytes")) ?: 0L)
                 }
                 "tool-call" -> {
                     val id = JsonText.string(obj["id"]) ?: ""

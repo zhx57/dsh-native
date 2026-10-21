@@ -682,21 +682,25 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         val projections = value["projections"] as? JsonObject ?: return null
         val values = projections["values"] as? JsonObject ?: return null
 
-        val todos = (values["todos"] as? JsonObject)?.let { todoContainer ->
-            val items = todoContainer["items"] as? kotlinx.serialization.json.JsonArray
-                ?: todoContainer["todos"] as? kotlinx.serialization.json.JsonArray
-                ?: return@let null
-            items.mapNotNull { element ->
-                val obj = element as? JsonObject ?: return@mapNotNull null
-                val content = dev.dsh.nativeapp.data.JsonText.string(obj["content"]) ?: return@mapNotNull null
-                val status = when (dev.dsh.nativeapp.data.JsonText.string(obj["status"])) {
-                    "in_progress" -> TodoStatus.InProgress
-                    "completed", "done" -> TodoStatus.Completed
-                    else -> TodoStatus.Pending
-                }
-                TodoItemOf(content, status)
+        // The host sends `todos` as a plain ARRAY of {content,status}. Reading it as
+        // an object with an `items` field matched nothing, so the panel never had
+        // anything to show; both shapes are accepted because older hosts nested it.
+        val todoRows = when (val raw = values["todos"]) {
+            is kotlinx.serialization.json.JsonArray -> raw
+            is JsonObject -> (raw["items"] as? kotlinx.serialization.json.JsonArray)
+                ?: (raw["todos"] as? kotlinx.serialization.json.JsonArray)
+            else -> null
+        }
+        val todos = todoRows.orEmpty().mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            val content = dev.dsh.nativeapp.data.JsonText.string(obj["content"]) ?: return@mapNotNull null
+            val status = when (dev.dsh.nativeapp.data.JsonText.string(obj["status"])) {
+                "in_progress" -> TodoStatus.InProgress
+                "completed", "done" -> TodoStatus.Completed
+                else -> TodoStatus.Pending
             }
-        }.orEmpty()
+            TodoItemOf(content, status)
+        }
 
         val preset = (values["permissions"] as? JsonObject)
             ?.let { dev.dsh.nativeapp.data.JsonText.string(it["currentValue"]) }
