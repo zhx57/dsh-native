@@ -8,11 +8,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -64,12 +66,13 @@ private const val HeadRows = 1
 /**
  * Whether the soft keyboard is showing.
  *
- * Isolated so the experimental-API opt-in lives in one place instead of on the
- * screen composable.
+ * `isImeVisible` is an extension property on the `WindowInsets` companion, so it has
+ * to be imported — a fully-qualified `WindowInsets.isImeVisible` does not resolve.
+ * Isolating it here keeps the experimental-API opt-in in one place.
  */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun isKeyboardVisible(): Boolean = androidx.compose.foundation.layout.WindowInsets.isImeVisible
+private fun isKeyboardVisible(): Boolean = WindowInsets.isImeVisible
 
 /** Native transcript for one session, with the composer docked underneath. */
 @Composable
