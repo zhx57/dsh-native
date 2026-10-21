@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dev.dsh.nativeapp.DshApplication
 import dev.dsh.nativeapp.data.ChatUiState
 import dev.dsh.nativeapp.data.ContextBreakdown
+import dev.dsh.nativeapp.data.ContextOccupancy
 import dev.dsh.nativeapp.data.SessionStats
 import dev.dsh.nativeapp.data.DshStream
 import dev.dsh.nativeapp.data.ModelCatalog

@@ -123,6 +123,37 @@ foreach ($file in $files) {
     }
 }
 
+# 5. A type declared in `data` is constructed from another package without an
+#    import. Kotlin reports only "Unresolved reference" and the build fails after a
+#    four-minute round trip; this exact mistake happened with a new metrics type.
+#
+#    Only constructor-shaped uses are checked (`Name(`), which is unambiguous enough
+#    to avoid guessing at every type position.
+$dataTypes = @{}
+if (Test-Path $dataRoot) {
+    foreach ($file in Get-ChildItem $dataRoot -Recurse -Filter *.kt -File) {
+        $text = Get-Content $file.FullName -Raw
+        if ($text -notmatch '(?m)^package\s+dev\.dsh\.nativeapp\.data\b') { continue }
+        foreach ($m in [regex]::Matches($text, '(?m)^(?:data |sealed |enum |abstract |open )*(?:class|interface|object)\s+([A-Z]\w*)')) {
+            $dataTypes[$m.Groups[1].Value] = $true
+        }
+    }
+}
+foreach ($file in $files) {
+    $text = Get-Content $file.FullName -Raw
+    if ($text -match '(?m)^package\s+dev\.dsh\.nativeapp\.data\b') { continue }
+    foreach ($name in $dataTypes.Keys) {
+        # Constructor call or declaration use; skip mentions in imports and comments.
+        if ($text -notmatch "(?m)^(?!\s*(//|\*|/\*|import )).*(?<![\w.])$name\s*\(") { continue }
+        if ($text -match [regex]::Escape("import dev.dsh.nativeapp.data.$name")) { continue }
+        if ($text -match [regex]::Escape("import dev.dsh.nativeapp.data.*")) { continue }
+        # A same-named enum entry shadows the data class and needs no import. Such an
+        # entry is also matched in a `when` branch, which is the cheap signal for it.
+        if ($text -match "(?m)^\s*$name\s*->") { continue }
+        $problems += "$($file.Name): constructs `"$name`" without `"import dev.dsh.nativeapp.data.$name`""
+    }
+}
+
 # 4. (not attempted) Nullable-receiver reads such as indexing a local assigned from
 #    `as?` inside a condition that checks other names. This is a real Kotlin error
 #    ("Only safe (?.) or non-null asserted (!!.) calls are allowed"), but deciding it
