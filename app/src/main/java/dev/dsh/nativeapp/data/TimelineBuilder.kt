@@ -87,6 +87,21 @@ class TimelineBuilder {
 
     fun snapshot(): List<TimelineItem> = items.toList()
 
+    /**
+     * Start time of the turn that has begun but not ended, or null when idle.
+     *
+     * `turn/start` and `turn/end` are both durable, so folding the log answers "is
+     * this session running" and "when did it start" even for a client that attached
+     * mid-turn. The app needs exactly that: `api-session/status` is only pushed when
+     * the flag *changes*, so re-entering a running session used to leave the UI
+     * believing it was idle until the next change — no stop button, no 深度求索中,
+     * and then a clock restarting from zero when status finally arrived.
+     */
+    fun openTurnStartedAt(): Long? = openTurnStart
+
+    /** Time of the current turn's `turn/start`, cleared by `turn/end`. */
+    private var openTurnStart: Long? = null
+
     /** Append a row unless an identical one is already present. */
     private fun append(item: TimelineItem) {
         appendReturningIndex(item)
@@ -175,6 +190,7 @@ class TimelineBuilder {
         detachedCalls.clear()
         frozenRows.clear()
         oldestEventSeq = Long.MAX_VALUE
+        openTurnStart = null
         streaming = null
         localSeq = 0L
         lastTime = 0L
@@ -198,13 +214,81 @@ class TimelineBuilder {
                 (value["records"] as? JsonArray)?.forEach { record ->
                     (record as? JsonObject)?.let(::applyRecord)
                 }
-                (value["assistantStream"] as? JsonArray)?.forEach { frame ->
-                    (frame as? JsonObject)?.let(::applyStreamFrame)
-                }
+                // The baseline is an OBJECT (`{revision, activeAttempt?}`), not an
+                // array of frames. Reading it as an array silently dropped the
+                // in-flight output, which is why re-entering a running session made
+                // the current turn's text vanish until the next turn's events landed.
+                (value["assistantStream"] as? JsonObject)?.let(::applyStreamBaseline)
             }
             "assistant-stream" -> (value["frame"] as? JsonObject)?.let(::applyStreamFrame)
             else -> Unit
         }
+    }
+
+    /**
+     * Restore the partial output of an attempt that is still generating.
+     *
+     * The host keeps a compact per-attempt record list so a reconnecting client can
+     * resume mid-stream: `text-chunks` carry an array of deltas, `reasoning-chunks`
+     * the same for thinking, `tool-call-chunks` the argument fragments.
+     */
+    private fun applyStreamBaseline(baseline: JsonObject) {
+        val attempt = baseline["activeAttempt"] as? JsonObject ?: return
+        val turn = JsonText.integer(attempt["turn"]) ?: 0
+        val step = JsonText.integer(attempt["step"]) ?: 0
+        val partition = "$turn:$step"
+        if (streaming?.partition == partition) return
+
+        discardStreaming()
+        val active = StreamingStep(
+            partition = partition,
+            turn = turn,
+            step = step,
+        )
+        JsonText.string(attempt["attemptId"])?.let { active.attemptIds.add(it) }
+
+        (attempt["stream"] as? JsonArray)?.forEach { element ->
+            val record = element as? JsonObject ?: return@forEach
+            when (JsonText.string(record["type"])) {
+                "text-chunks" -> {
+                    val text = joinTexts(record["texts"])
+                    if (text.isNotEmpty()) appendText(active, text)
+                }
+                "reasoning-chunks" -> {
+                    val text = joinTexts(record["texts"])
+                    if (text.isNotEmpty()) appendReasoning(active, text)
+                }
+                "chunk" -> {
+                    // A single timed chunk inside the compact stream; fold it with the
+                    // same reducer the live path uses.
+                    (record["chunk"] as? JsonObject)?.let { applyChunk(active, it, lastTime) }
+                }
+                else -> Unit
+            }
+        }
+
+        // Create the prose row before registering calls so a restored step reads
+        // text-then-tools, the same order the live path produces.
+        streaming = active
+        if (active.blocks.isNotEmpty()) {
+            ensureStreamingRow(active, lastTime)
+            refreshStreaming(active, lastTime)
+        }
+
+        (attempt["stream"] as? JsonArray)?.forEach { element ->
+            val record = element as? JsonObject ?: return@forEach
+            if (JsonText.string(record["type"]) != "tool-call-chunks") return@forEach
+            val id = JsonText.string(record["id"]) ?: return@forEach
+            val name = JsonText.string(record["name"]) ?: ""
+            val args = joinTexts(record["args"])
+            registerCall(id, name.ifBlank { "tool" }, args, localSeq, lastTime)
+        }
+    }
+
+    /** Join a compact record's delta array into the text it accumulated. */
+    private fun joinTexts(element: kotlinx.serialization.json.JsonElement?): String {
+        val array = element as? JsonArray ?: return ""
+        return array.joinToString("") { (it as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty() }
     }
 
     // ----------------------------------------------------------------- events
@@ -225,11 +309,13 @@ class TimelineBuilder {
             "tool/call" -> applyToolCall(seq, time, data)
             "tool/result" -> applyToolResult(seq, time, data)
             "turn/start" -> {
+                openTurnStart = time
                 val turn = JsonText.integer(data["turn"]) ?: 0
                 if (turn > 1) append(TimelineItem.TurnDivider(seq, time, turn))
             }
             "step/end" -> closeStreaming()
             "turn/end" -> {
+                openTurnStart = null
                 closeStreaming()
                 applyTurnEnd(seq, time, data)
             }

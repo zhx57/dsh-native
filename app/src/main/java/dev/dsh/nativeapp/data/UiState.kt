@@ -171,6 +171,14 @@ data class SessionRow(
     val blank: Boolean = false,
     /** Pinned sessions sort first in the drawer. */
     val pinned: Boolean = false,
+    /**
+     * Working directory of the session.
+     *
+     * Grouping reads this rather than a workspace's cached `sessionIds`: that list is
+     * delivered once in the `workspace/follow` baseline, so sessions created later
+     * never appeared in the drawer no matter how often the index was re-read.
+     */
+    val cwd: String = "",
 )
 
 /** Workspace group in the drawer. */

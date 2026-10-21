@@ -29,6 +29,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,6 +55,14 @@ import dev.dsh.nativeapp.ui.theme.LocalDshColors
 fun ReasoningBlock(text: String, streaming: Boolean) {
     val colors = LocalDshColors.current
     var expanded by remember { mutableStateOf(false) }
+
+    // While the model is thinking, show the text as it arrives. Collapsed-by-default
+    // meant the panel only said 思考中… and the reasoning then appeared in one block
+    // when the step committed, which read as "no streaming at all". A settled block
+    // still defaults to collapsed, so a finished transcript stays compact.
+    LaunchedEffect(streaming) {
+        if (streaming) expanded = true
+    }
 
     Column(
         Modifier

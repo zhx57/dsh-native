@@ -93,10 +93,11 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
             // a stop with a stale flag either did nothing or cancelled the wrong turn.
             channel.status.collect { (sessionId, running) ->
                 if (sessionId == _chat.value.sessionId) {
-                    // Stamp the turn's start so the 深度求索中 clock measures this run
-                    // and not the time since the app launched.
+                    // Stamp the turn's start only when the log cannot supply one, so a
+                    // pushed status never restarts a clock that is already running.
                     val since = when {
                         !running -> null
+                        activeBuilder.openTurnStartedAt() != null -> activeBuilder.openTurnStartedAt()
                         _chat.value.running -> _chat.value.runningSince
                         else -> System.currentTimeMillis()
                     }
@@ -255,8 +256,10 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
     private fun startIndexPolling() {
         viewModelScope.launch {
             while (true) {
-                kotlinx.coroutines.delay(8_000)
-                if (_chat.value.sessionId == null) continue
+                kotlinx.coroutines.delay(5_000)
+                // No session-id guard: the drawer must keep working (and reflect new
+                // sessions) even before the first conversation is opened, which is
+                // exactly when a fresh session is created.
                 val summaries = runCatching { repo.listSessions() }.getOrNull() ?: continue
                 applySessions(summaries)
             }
@@ -395,6 +398,7 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                     running = summary.running,
                     updatedAt = summary.updatedAt,
                     blank = summary.blank,
+                    cwd = summary.cwd.orEmpty(),
                 )
             }
             .sortedByDescending { it.updatedAt }
@@ -454,29 +458,41 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
     }
 
     private suspend fun regroup() {
-        val rows = _sessions.value.associateBy { it.sessionId }
         val pinned = _pinnedSessionIds.value
         val archived = _archivedSessionIds.value
-        // Recently used first, but pinned sessions lead and archived ones are
-        // dropped: a pinned conversation is what the operator wants at the top of the
-        // drawer, and an archived one is deliberately out of the way.
-        val groups = workspaceIndex.values.map { workspace ->
-            WorkspaceGroup(
-                workspaceId = workspace.workspaceId,
-                title = workspace.displayName,
-                sessions = workspace.sessionIds
-                    .mapNotNull { rows[it] }
-                    .filter { it.sessionId !in archived }
-                    .sortedWith(
-                        compareByDescending<SessionRow> { it.sessionId in pinned }
-                            .thenByDescending { it.updatedAt },
-                    )
-                    .map { it.copy(pinned = it.sessionId in pinned) },
-            )
-        }.filter { it.sessions.isNotEmpty() }
+
+        // Group from the session index, not from a workspace's cached `sessionIds`.
+        // That list arrives once in the `workspace/follow` baseline and is only
+        // updated for pin/archive frames, so a session created afterwards never
+        // appeared in the drawer however often the index was re-read. The workspace
+        // record is still used, but only to give the group its name.
+        val titleByPath = workspaceIndex.values.associate { normalisePath(it.path) to it.displayName }
+
+        val visible = _sessions.value.filter { it.sessionId !in archived }
+        val groups = visible
+            .groupBy { normalisePath(it.cwd) }
+            .map { (path, sessions) ->
+                WorkspaceGroup(
+                    workspaceId = path.ifBlank { "unassigned" },
+                    title = titleByPath[path]
+                        ?: sessions.firstOrNull()?.subtitle?.takeIf { it.isNotBlank() }
+                        ?: "其他",
+                    // Pinned conversations lead their group, then most recent first.
+                    sessions = sessions
+                        .sortedWith(
+                            compareByDescending<SessionRow> { it.sessionId in pinned }
+                                .thenByDescending { it.updatedAt },
+                        )
+                        .map { it.copy(pinned = it.sessionId in pinned) },
+                )
+            }
             .sortedByDescending { group -> group.sessions.maxOfOrNull { it.updatedAt } ?: 0L }
         _workspaces.value = groups
     }
+
+    /** Compare directories the way the host would, across separators and case. */
+    private fun normalisePath(path: String): String =
+        path.replace('/', '\\').trimEnd('\\').lowercase()
 
     fun refreshCatalog() {
         viewModelScope.launch {
@@ -512,6 +528,13 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         // the state here made the card flash and vanish.
         val carriedQuestion = _chat.value.liveQuestion
         val carriedApproval = _chat.value.pendingApproval
+        // Seed the running flag from the index instead of assuming idle. The
+        // `$events` status frame only fires on a *change*, so a session that was
+        // already running when we re-entered produced no frame at all: the composer
+        // showed send instead of stop, and no 深度求索中 indicator appeared until the
+        // turn happened to change state. The start time stays null here and is filled
+        // in from the folded log, which knows the real turn/start timestamp.
+        val seeded = _sessions.value.firstOrNull { it.sessionId == sessionId }
         _chat.value = ChatUiState(
             sessionId = sessionId,
             connecting = true,
@@ -520,6 +543,8 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
             // Only carry a question that belongs to the session being opened.
             liveQuestion = carriedQuestion?.takeIf { it.agentId == null || it.agentId == sessionId },
             pendingApproval = carriedApproval,
+            running = seeded?.running ?: false,
+            runningSince = null,
         )
         loadCommands()
         val title = _sessions.value.firstOrNull { it.sessionId == sessionId }?.title.orEmpty()
@@ -540,12 +565,19 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
                 val selection = detectModelSelection(value)
                 val extras = detectExtras(value)
                 viewModelScope.launch {
-                    val nextRunning = running ?: _chat.value.running
+                    // The folded log is authoritative for a client that attached
+                    // mid-turn: an unclosed `turn/start` means the session is running
+                    // and its timestamp is when the clock should have started. The
+                    // pushed status still wins when it arrives, but it no longer
+                    // resets the elapsed time to zero.
+                    val openTurn = activeBuilder.openTurnStartedAt()
+                    val nextRunning = running ?: _chat.value.running || openTurn != null
                     val since = when {
                         !nextRunning -> null
-                        _chat.value.running -> _chat.value.runningSince
-                        // The fallback path saw turn/start here, so this is the
-                        // best available stamp for the 深度求索中 clock.
+                        // Prefer the durable timestamp over a wall-clock stamp taken
+                        // when a frame happened to arrive.
+                        openTurn != null -> openTurn
+                        _chat.value.runningSince != null -> _chat.value.runningSince
                         else -> System.currentTimeMillis()
                     }
                     _chat.value = _chat.value.copy(
