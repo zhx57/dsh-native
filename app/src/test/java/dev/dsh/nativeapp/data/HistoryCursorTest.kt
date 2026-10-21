@@ -27,6 +27,28 @@ class HistoryCursorTest {
     )
 
     @Test
+    fun `an empty builder reports no window rather than the log start`() {
+        // This is the distinction the premature "already the earliest" notice hinged
+        // on: 0 means "nothing folded yet, window unknown", not "reached seq 0".
+        // The caller must skip, never conclude.
+        val builder = TimelineBuilder()
+        assertEquals(0L, builder.oldestSeq())
+    }
+
+    @Test
+    fun `folding only seq zero still reports a known window`() {
+        // A session's very first events sit at seq 0; `noteEvent` ignores them so the
+        // sentinel keeps meaning "unknown" instead of colliding with a real seq.
+        val builder = TimelineBuilder()
+        builder.applyRecord(record(0, "permission/preset", """{"preset":"never"}"""))
+        assertEquals(0L, builder.oldestSeq())
+
+        // One real event makes the window known.
+        builder.applyRecord(user(4, "hi"))
+        assertEquals(4L, builder.oldestSeq())
+    }
+
+    @Test
     fun `oldest seq is the lowest event folded`() {
         val builder = TimelineBuilder()
         builder.applyRecord(user(10, "a"))

@@ -323,7 +323,11 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         if (loadingHistory || !_hasMoreHistory.value) return
         val cursor = activeBuilder.oldestSeq()
         if (cursor <= 0) {
-            _hasMoreHistory.value = false
+            // Nothing has been folded yet, so the window's start is unknown — not
+            // reached. Concluding "no more history" here is what made the app claim
+            // 已经是最早的消息 permanently: the list's scroll indicator emits (0, 0)
+            // as soon as it composes, which fires this before the follow snapshot
+            // arrives.
             return
         }
         loadingHistory = true

@@ -23,6 +23,8 @@ $required = @{
     'SelectionContainer'    = 'androidx.compose.foundation.text.selection.SelectionContainer'
     'height'                = 'androidx.compose.foundation.layout.height'
     'heightIn'              = 'androidx.compose.foundation.layout.heightIn'
+    'width'                 = 'androidx.compose.foundation.layout.width'
+    'size'                  = 'androidx.compose.foundation.layout.size'
     'widthIn'               = 'androidx.compose.foundation.layout.widthIn'
     'clickable'             = 'androidx.compose.foundation.clickable'
     'border'                = 'androidx.compose.foundation.border'
@@ -31,7 +33,9 @@ $required = @{
     'statusBarsPadding'     = 'androidx.compose.foundation.layout.statusBarsPadding'
     'safeDrawingPadding'    = 'androidx.compose.foundation.layout.safeDrawingPadding'
     'combinedClickable'     = 'androidx.compose.foundation.combinedClickable'
-    'weight'                = 'androidx.compose.foundation.layout.RowScope'
+    # `weight` is deliberately absent: it is a RowScope/ColumnScope extension, so it
+    # resolves inside a Row/Column without an import. Listing it flagged every layout
+    # file once the dot-prefixed form started matching.
     'Color'                 = 'androidx.compose.ui.graphics.Color'
 }
 
@@ -41,10 +45,18 @@ foreach ($file in $files) {
 
     foreach ($symbol in $required.Keys) {
         $import = $required[$symbol]
-        # Only flag real usages: `Symbol` or `Symbol(` or `.Symbol`. Comment lines
-        # are skipped because a prose mention of a word like "height" is not a call.
-        $usage = [regex]::IsMatch($text, "(?m)^(?!\s*(//|\*|/\*|import )).*?(?<![\w.])$symbol\s*[.(]")
+        # Only flag real usages: `Symbol(` or `.Symbol(`. Comments are skipped because
+        # a prose mention of a word like "height" is not a call.
+        #
+        # The preceding dot is deliberately allowed: the common form is
+        # `Modifier.size(...)`, and an earlier version excluded it, so the whole table
+        # silently missed every chained layout call.
+        $usage = [regex]::IsMatch(
+            $text,
+            "(?m)^(?!\s*(//|\*|/\*|import )).*(?:[^\w.]|\.)$symbol\s*\("
+        )
         if (-not $usage) { continue }
+        # A property read such as `list.size` is not a call, so no import is needed.
         if ($text -match [regex]::Escape("import $import")) { continue }
         # Symbols resolvable through the wildcard-ish stdlib or same package are skipped.
         if ($text -match [regex]::Escape("import ${import.Split('.')[0..($import.Split('.').Length - 2)] -join '.'}.*")) { continue }

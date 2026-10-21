@@ -168,13 +168,16 @@ fun ChatScreen(
     // Load earlier history when the operator reaches the top. The follow stream only
     // replays the newest window, so without this the transcript simply ended.
     //
-    // The trigger requires the head indicator itself to be on screen AND the list to
-    // actually be scrolled to its top. Firing on `first <= 1` alone meant the request
-    // repeated while a page was in flight and, worse, fired again the instant a
-    // prepend finished — which kept the spinner cycling and made the "已经是最早"
-    // notice appear while older messages still existed.
-    LaunchedEffect(listState, hasMoreHistory, loadingOlder) {
-        if (!hasMoreHistory || loadingOlder) return@LaunchedEffect
+    // Guarded three ways, because a bare "index is near the top" test fired while the
+    // list was still empty and burned the only chance to page:
+    //  - `itemCount > 0`, so an unpainted list cannot ask for history;
+    //  - `hasMoreHistory`, so an exhausted log stops asking;
+    //  - `loadingOlder`, so one page is in flight at a time.
+    //
+    // `itemCount` is a key as well: when content arrives while the operator is already
+    // parked at the top, the anchor does not move, so nothing else would re-arm this.
+    LaunchedEffect(listState, hasMoreHistory, loadingOlder, itemCount) {
+        if (!hasMoreHistory || loadingOlder || itemCount == 0) return@LaunchedEffect
         snapshotFlow {
             // Read from the state object: the offset lives there, not on layoutInfo.
             listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset

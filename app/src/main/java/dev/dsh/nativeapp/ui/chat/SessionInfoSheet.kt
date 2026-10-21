@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -148,11 +150,29 @@ private fun ContextCard(state: ChatUiState) {
 
         if (breakdown != null && breakdown.total > 0) {
             Spacer(Modifier.height(8.dp))
+            // The same three colours are used by the bar and by the rows below it, so
+            // each segment is identifiable. Without the swatches the bar was three
+            // unexplained colours.
             BreakdownBar(breakdown.systemTokens, breakdown.toolsTokens, breakdown.messageTokens)
             Spacer(Modifier.height(7.dp))
-            MetricRow("系统提示词", fmt(breakdown.systemTokens), hint = percent(breakdown.systemTokens, breakdown.total))
-            MetricRow("工具定义", fmt(breakdown.toolsTokens), hint = percent(breakdown.toolsTokens, breakdown.total))
-            MetricRow("对话消息", fmt(breakdown.messageTokens), hint = percent(breakdown.messageTokens, breakdown.total))
+            MetricRow(
+                label = "系统提示词",
+                value = fmt(breakdown.systemTokens),
+                hint = percent(breakdown.systemTokens, breakdown.total),
+                swatch = LocalDshColors.current.buttonInfoFill,
+            )
+            MetricRow(
+                label = "工具定义",
+                value = fmt(breakdown.toolsTokens),
+                hint = percent(breakdown.toolsTokens, breakdown.total),
+                swatch = LocalDshColors.current.stateWarn,
+            )
+            MetricRow(
+                label = "对话消息",
+                value = fmt(breakdown.messageTokens),
+                hint = percent(breakdown.messageTokens, breakdown.total),
+                swatch = LocalDshColors.current.link,
+            )
         }
     }
 }
@@ -222,12 +242,27 @@ private fun MetricTitle(text: String) {
 }
 
 @Composable
-private fun MetricRow(label: String, value: String, hint: String? = null, emphasis: Boolean = false) {
+private fun MetricRow(
+    label: String,
+    value: String,
+    hint: String? = null,
+    emphasis: Boolean = false,
+    /** Colour of the matching bar segment, so the bar's legend is inline. */
+    swatch: Color? = null,
+) {
     val colors = LocalDshColors.current
     Row(
         Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (swatch != null) {
+            Box(
+                Modifier
+                    .size(7.dp)
+                    .background(swatch, RoundedCornerShape(2.dp)),
+            )
+            Spacer(Modifier.width(6.dp))
+        }
         Text(
             text = label,
             fontSize = 12.sp,
