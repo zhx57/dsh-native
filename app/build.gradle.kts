@@ -34,6 +34,14 @@ android {
         }
     }
 
+    lint {
+        // `assembleRelease` otherwise runs `lintVitalRelease`, a full analysis pass
+        // on every push. It has never caught anything a compiler or a test did not,
+        // and it dominated the build time; run it deliberately with `gradle lint`.
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true

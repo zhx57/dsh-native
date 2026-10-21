@@ -57,20 +57,29 @@ jobs:
             } >> "$GITHUB_ENV"
             echo "Signing key restored."
           else
-            echo "No signing secret configured; the release APK stays unsigned and the debug APK is published."
+            echo "No signing secret configured; the release APK stays unsigned."
           fi
 
-      - name: Unit tests
-        run: gradle :app:testDebugUnitTest --stacktrace --no-daemon
-
-      - name: Compile
-        run: gradle :app:assembleRelease :app:assembleDebug --stacktrace --no-daemon
+      # One invocation: one configuration phase, and one compile of the sources.
+      #
+      # This used to be two steps, each with `--no-daemon`: the flag threw away the
+      # daemon that would have carried incremental state between the tasks, the
+      # configuration phase was paid twice, and Kotlin compiled twice because the
+      # tests ran against the *debug* variant while the APK came from *release*.
+      # `testReleaseUnitTest` reuses the exact classes `assembleRelease` needs.
+      #
+      # `assembleDebug` is gone too: the installed APK is the release one, so the
+      # debug variant was a full extra compile plus packaging for an unused artifact.
+      #
+      # Build caching and the configuration cache are enabled in gradle.properties, so
+      # no flags are needed here.
+      - name: Test and build
+        run: gradle :app:testReleaseUnitTest :app:assembleRelease --stacktrace
 
       - name: Collect artifacts
         run: |
           mkdir -p out
-          cp app/build/outputs/apk/release/*.apk out/ 2>/dev/null || true
-          cp app/build/outputs/apk/debug/*.apk out/ 2>/dev/null || true
+          cp app/build/outputs/apk/release/*.apk out/
           ls -la out
 
       - name: Upload APK
