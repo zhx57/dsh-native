@@ -282,6 +282,8 @@ private fun DshRoot(
                 question = chat.liveQuestion!!,
                 onSubmit = { answers -> vm.answerLiveQuestion(answers) },
                 onDismiss = { vm.dismissLiveQuestion() },
+                submitting = chat.sending,
+                error = chat.error,
             )
         }
 

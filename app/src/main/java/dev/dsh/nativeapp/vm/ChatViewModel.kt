@@ -14,9 +14,11 @@ import dev.dsh.nativeapp.data.SessionSummary
 import dev.dsh.nativeapp.data.TimelineBuilder
 import dev.dsh.nativeapp.data.WorkspaceGroup
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import dev.dsh.nativeapp.data.LiveQuestion
 import dev.dsh.nativeapp.data.PendingRequest
 import kotlinx.serialization.json.buildJsonObject
@@ -82,11 +84,8 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
      */
     private fun listenForRequests() {
         val channel = app.events()
-        channel.start(
-            onError = { error ->
-                _chat.value = _chat.value.copy(error = describe(error, "事件通道断开"))
-            },
-        )
+        // Reconnecting channel: pass a scope so it can reopen itself after a drop.
+        channel.start(viewModelScope)
         viewModelScope.launch {
             // The Host's own running flag drives the send/stop button. Deriving it
             // from turn/start and turn/end drifted whenever an event was missed, and
@@ -114,20 +113,22 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
             channel.requests.collect { request ->
                 when (request) {
                     is PendingRequest.Question -> {
-                        // Only surface a question for the conversation on screen.
-                        // Stale requests from earlier sessions pile up on `$events`
-                        // and would otherwise pop up over an unrelated transcript.
-                        val active = _chat.value.sessionId
-                        if (active != null && request.agentId != null && request.agentId != active) {
-                            return@collect
-                        }
-                        _chat.value = _chat.value.copy(
-                            liveQuestion = LiveQuestion(
-                                eventId = request.eventId,
-                                agentId = request.agentId,
-                                questions = request.questions,
-                            ),
+                        val live = LiveQuestion(
+                            eventId = request.eventId,
+                            agentId = request.agentId,
+                            questions = request.questions,
                         )
+                        // Attribute the question to its session and keep it there.
+                        // It used to be shown whenever the app had no session open yet
+                        // (a null id passed the old filter), so a question belonging to
+                        // another conversation flashed over the screen at startup and
+                        // then vanished as `openSession` replaced the state.
+                        val owner = request.agentId
+                        if (owner != null) {
+                            pendingQuestions[owner] = live
+                            if (owner != _chat.value.sessionId) return@collect
+                        }
+                        _chat.value = _chat.value.copy(liveQuestion = live)
                     }
                     is PendingRequest.Approval -> {
                         _chat.value = _chat.value.copy(
@@ -143,6 +144,16 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
             }
         }
     }
+
+    /**
+     * Questions the Host is blocking on, keyed by their session.
+     *
+     * `$events` replays every still-open waterfall to each new subscriber, so these
+     * pile up across sessions. Holding them here lets `openSession` surface the one
+     * that belongs to the conversation being opened, instead of flashing a foreign
+     * question at startup.
+     */
+    private val pendingQuestions = mutableMapOf<String, LiveQuestion>()
 
     /** Hide the question panel without answering; the Host stays blocked. */
     fun dismissLiveQuestion() {
@@ -203,17 +214,25 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         // The card stays up until the Host accepts the answer. Optimistically
         // clearing it made a failed submit look like a silent success: the question
         // vanished, the turn stayed blocked, and there was no way to retry.
-        _chat.value = _chat.value.copy(sending = true)
+        _chat.value = _chat.value.copy(sending = true, error = null)
         viewModelScope.launch {
             val channel = app.events()
+            // Wait briefly for a `ready` frame if the channel is reconnecting; the
+            // answer is addressable only after the Host has named this client.
+            if (channel.clientId.value == null) {
+                withTimeoutOrNull(3_000) {
+                    channel.ready.first { it }
+                }
+            }
             val ok = channel.answer(request, channel.answerValue(answers))
-            _chat.value = if (ok) {
-                _chat.value.copy(liveQuestion = null, sending = false)
+            if (ok) {
+                live.agentId?.let { pendingQuestions.remove(it) }
+                _chat.value = _chat.value.copy(liveQuestion = null, sending = false)
             } else {
-                _chat.value.copy(
+                _chat.value = _chat.value.copy(
                     sending = false,
                     error = channel.lastError.value
-                        ?: if (channel.clientId.value == null) "连不上主机的事件通道，正在重连" else "提交回答失败",
+                        ?: if (channel.clientId.value == null) "事件通道正在重连，请重试" else "提交回答失败",
                 )
             }
         }
@@ -528,20 +547,19 @@ class ChatViewModel(private val app: DshApplication) : ViewModel() {
         // the state here made the card flash and vanish.
         val carriedQuestion = _chat.value.liveQuestion
         val carriedApproval = _chat.value.pendingApproval
-        // Seed the running flag from the index instead of assuming idle. The
-        // `$events` status frame only fires on a *change*, so a session that was
-        // already running when we re-entered produced no frame at all: the composer
-        // showed send instead of stop, and no 深度求索中 indicator appeared until the
-        // turn happened to change state. The start time stays null here and is filled
-        // in from the folded log, which knows the real turn/start timestamp.
+        // A question the Host is still blocking on belongs to its own session, so it
+        // is restored from the per-session map rather than carried blindly from the
+        // previous screen. An unattributed request (no agent id) has nowhere to live
+        // in that map, so it is carried as-is.
+        val restored = pendingQuestions[sessionId]
+            ?: carriedQuestion?.takeIf { it.agentId == null }
         val seeded = _sessions.value.firstOrNull { it.sessionId == sessionId }
         _chat.value = ChatUiState(
             sessionId = sessionId,
             connecting = true,
             title = if (keepTimeline) _chat.value.title else "",
             timeline = if (keepTimeline) _chat.value.timeline else emptyList(),
-            // Only carry a question that belongs to the session being opened.
-            liveQuestion = carriedQuestion?.takeIf { it.agentId == null || it.agentId == sessionId },
+            liveQuestion = restored,
             pendingApproval = carriedApproval,
             running = seeded?.running ?: false,
             runningSince = null,

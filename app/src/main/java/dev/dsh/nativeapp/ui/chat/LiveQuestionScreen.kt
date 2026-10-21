@@ -53,6 +53,8 @@ fun LiveQuestionScreen(
     question: LiveQuestion,
     onSubmit: (Map<String, List<String>>) -> Unit,
     onDismiss: () -> Unit,
+    submitting: Boolean = false,
+    error: String? = null,
 ) {
     val colors = LocalDshColors.current
     var chosen by remember(question.eventId) { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
@@ -150,20 +152,34 @@ fun LiveQuestionScreen(
             val complete = question.questions.all {
                 chosen[it.id].orEmpty().isNotEmpty() || !custom[it.id].isNullOrBlank()
             }
+            // A failed submit used to report into the chat screen behind this
+            // full-screen surface, so it looked like nothing happened at all.
+            if (!error.isNullOrBlank()) {
+                Text(
+                    text = error,
+                    fontSize = 12.sp,
+                    color = colors.stateError,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = DshSpacing.md.dp, vertical = 4.dp),
+                )
+            }
             Text(
-                text = "提交",
+                text = if (submitting) "提交中…" else "提交",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
-                color = if (complete) colors.buttonPrimaryForeground else colors.labelCaption,
+                color = if (complete && !submitting) colors.buttonPrimaryForeground else colors.labelCaption,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = DshSpacing.md.dp, vertical = DshSpacing.sm.dp)
                     .background(
-                        if (complete) colors.buttonPrimaryFill else colors.bgSkeleton,
+                        if (complete && !submitting) colors.buttonPrimaryFill else colors.bgSkeleton,
                         RoundedCornerShape(DshRadius.full.dp),
                     )
-                    .clickable(enabled = complete) { onSubmit(effective()) }
+                    // Repeat taps while a submit is in flight would send the same
+                    // answer twice, which the Host rejects as a settled waterfall.
+                    .clickable(enabled = complete && !submitting) { onSubmit(effective()) }
                     .padding(vertical = 12.dp),
             )
         }

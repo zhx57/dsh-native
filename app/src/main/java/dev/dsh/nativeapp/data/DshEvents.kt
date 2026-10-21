@@ -2,10 +2,13 @@ package dev.dsh.nativeapp.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -56,52 +59,90 @@ class DshEvents(private val client: DshClient) {
     val status: SharedFlow<Pair<String, Boolean>> = _status
 
     private var stream: DshStream? = null
+    private var job: kotlinx.coroutines.Job? = null
 
-    /** Open the channel. Idempotent; call [close] to detach. */
-    fun start(
-        onError: (Throwable) -> Unit = {},
-        onReady: () -> Unit = {},
-    ) {
-        if (stream != null) return
-        stream = client.stream(
-            endpoint = "\$events",
-            args = buildJsonObject { },
-            onItem = { value ->
-                val frame = value as? JsonObject ?: return@stream
-                when (JsonText.string(frame["type"])) {
-                    "ready" -> {
-                        _clientId.value = JsonText.string(frame["clientId"])
-                        onReady()
-                    }
-                    "waterfall" -> parseWaterfall(frame)?.let { _requests.tryEmit(it) }
-                    // Authoritative running flag: the Host emits this from
-                    // `agent/status`, so it is the same signal the web UI trusts for
-                    // its send/stop button. Inferring from turn/start and turn/end
-                    // drifts whenever an event is missed or a turn is resumed.
-                    "emit" -> {
-                        if (JsonText.string(frame["event"]) == "api-session/status") {
-                            val args = frame["args"] as? JsonArray ?: frame["payload"] as? JsonArray
-                            val sessionId = args?.getOrNull(0)?.let(JsonText::string)
-                            val running = args?.getOrNull(1)?.let(JsonText::bool)
-                            if (sessionId != null && running != null) {
-                                _status.tryEmit(sessionId to running)
-                            }
-                        }
-                    }
-                    else -> Unit
-                }
-            },
-            onError = { error ->
+    /** True once the Host has named this client; answers need that name. */
+    private val _ready = MutableStateFlow(false)
+    val ready: StateFlow<Boolean> = _ready
+
+    /**
+     * Open the channel and keep it open.
+     *
+     * The stream used to be opened once and never reopened: a dropped socket (host
+     * restart, network change, ping timeout) left [stream] null forever and
+     * [clientId] pointing at a subscription the host no longer knew. Every later
+     * answer was addressed to that dead name, which is why submitting a question
+     * failed even though the card had arrived on the same connection earlier.
+     */
+    fun start(scope: kotlinx.coroutines.CoroutineScope) {
+        if (job?.isActive == true) return
+        job = scope.launch {
+            var backoff = 1_000L
+            while (isActive) {
+                val closed = kotlinx.coroutines.CompletableDeferred<Unit>()
+                stream = client.stream(
+                    endpoint = "\$events",
+                    args = buildJsonObject { },
+                    onItem = { value -> handleFrame(value) { backoff = 1_000L } },
+                    onError = { error ->
+                        // The host no longer knows this client, so nothing may be
+                        // addressed to it until a new `ready` names us again.
+                        _clientId.value = null
+                        _ready.value = false
+                        _lastError.value = error.message ?: "事件通道断开"
+                        closed.complete(Unit)
+                    },
+                    onClosed = {
+                        _clientId.value = null
+                        _ready.value = false
+                        closed.complete(Unit)
+                    },
+                )
+                closed.await()
                 stream = null
-                onError(error)
-            },
-            onClosed = { stream = null },
-        )
+                if (!isActive) break
+                delay(backoff)
+                backoff = (backoff * 2).coerceAtMost(15_000)
+            }
+        }
+    }
+
+    /** Fold one `$events` frame. */
+    private fun handleFrame(value: kotlinx.serialization.json.JsonElement, onProgress: () -> Unit) {
+        val frame = value as? JsonObject ?: return
+        when (JsonText.string(frame["type"])) {
+            "ready" -> {
+                _clientId.value = JsonText.string(frame["clientId"])
+                _ready.value = _clientId.value != null
+                _lastError.value = null
+                onProgress()
+            }
+            "waterfall" -> parseWaterfall(frame)?.let { _requests.tryEmit(it) }
+            // Authoritative running flag: the Host emits this from `agent/status`, so
+            // it is the same signal the web UI trusts for its send/stop button.
+            // Inferring from turn/start and turn/end drifts whenever an event is
+            // missed or a turn is resumed.
+            "emit" -> {
+                if (JsonText.string(frame["event"]) == "api-session/status") {
+                    val args = frame["args"] as? JsonArray ?: frame["payload"] as? JsonArray
+                    val sessionId = args?.getOrNull(0)?.let(JsonText::string)
+                    val running = args?.getOrNull(1)?.let(JsonText::bool)
+                    if (sessionId != null && running != null) {
+                        _status.tryEmit(sessionId to running)
+                    }
+                }
+            }
+            else -> Unit
+        }
     }
 
     fun close() {
+        job?.cancel()
+        job = null
         stream?.cancel()
         stream = null
+        _clientId.value = null
+        _ready.value = false
     }
 
     /**
